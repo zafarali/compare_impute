@@ -5,7 +5,7 @@ author: Gerard Tse (gerardtse@gmail.com)
 Common utility methods for our Python scripts. In particular
 this provides helper methods for working with qsub.
 """
-import commands
+import subprocess
 import errno
 import os
 import shutil
@@ -37,8 +37,8 @@ def initialize_config(options):
         CONFIG.QSUB_ID_FILE = options.qsub_id_file
     if hasattr(options, 'qsub_use_testq'):
         CONFIG.QSUB_USE_TESTQ = int(options.qsub_use_testq)
-    if hasattr(options, 'qsub_run_locally'):
-        CONFIG.QSUB_RUN_LOCALLY = int(options.qsub_run_locally)
+    #if hasattr(options, 'qsub_run_locally'):
+    CONFIG.QSUB_RUN_LOCALLY = 1#int(options.qsub_run_locally) #TODO change this for large analysis
 
 # Helper function to record commands, handle return values and print to log file
 def run(info, cmd):
@@ -49,7 +49,7 @@ def run(info, cmd):
     logFile.write(header + "\n")
     logFile.close()
 
-    exit_status, stdout = commands.getstatusoutput(cmd)
+    exit_status, stdout = subprocess.getstatusoutput(cmd)
     end_time = time.time()
 
     summary = "Status: %s\nElapsed: %s ms\n%s" % (exit_status, int((end_time - start_time) * 1000), stdout)
@@ -59,19 +59,19 @@ def run(info, cmd):
     logFile.close()
 
     if exit_status:
-        print header
-        print summary
+        print(header)
+        print(summary)
         raise RuntimeError("Command failed. See above for info")
 
-    print stdout
+    print(stdout)
     return stdout
 
-def qsub(job_name, comment, command, wait_jobs = [], qsub_args = [], is_script = False, vmem = None, logdir = None, queue = None):
+def qsub(job_name, comment, command, wait_jobs = [], qsub_args = [], is_script = False, vmem = None, logdir = None, queue = None, sync=False):
     if CONFIG.QSUB_RUN_LOCALLY:
-        print "TEST ONLY! Running locally: %s\n%s" % (comment, command)
+        print("TEST ONLY! Running locally: %s\n%s" % (comment, command))
         run(comment, command)
         return None
-    
+
     logdir = logdir or CONFIG.LOGS
     assert logdir is not None
 
@@ -84,8 +84,10 @@ def qsub(job_name, comment, command, wait_jobs = [], qsub_args = [], is_script =
         cmd += " -b y"
     if vmem:
         cmd += " -l h_vmem=%dg -R y" % vmem
+    if sync:
+        cmd += " -sync y"
     if CONFIG.QSUB_USE_TESTQ:
-        print "Warning: Command running on test queue"
+        print("Warning: Command running on test queue")
         cmd += " -l testq=1"
     elif queue:
         cmd += " -q " + queue
@@ -99,17 +101,17 @@ def qsub(job_name, comment, command, wait_jobs = [], qsub_args = [], is_script =
         f = open(CONFIG.QSUB_ID_FILE, 'a')
         f.write("%s\n" % jobid)
         f.close()
-    
+
     return jobid
 
-def qsub_shell_commands(job_name, comment, command, wait_jobs = [], vmem = None, logdir = None, queue = None):
+def qsub_shell_commands(job_name, comment, command, wait_jobs = [], vmem = None, logdir = None, queue = None, sync=False):
     fd, fn = tempfile.mkstemp(suffix=".sh", prefix="qsub_script.")
     f = os.fdopen(fd, 'w')
     f.write("#!/bin/bash\n")
     f.write(command)
     f.close()
     os.chmod(fn, stat.S_IXUSR | stat.S_IRUSR)
-    result = qsub(job_name, comment, fn, wait_jobs, is_script = True, vmem = vmem, logdir = logdir, queue = queue)
+    result = qsub(job_name, comment, fn, wait_jobs, is_script = True, vmem = vmem, logdir = logdir, queue = queue, sync=False)
     os.remove(fn)
     return result
 
@@ -117,7 +119,7 @@ def mkdirp(dirname, empty = False):
     if empty:
         try:
              shutil.rmtree(dirname)
-        except OSError, e:
+        except OSError as e:
              if e.errno == errno.ENOENT:
                 pass
              else: raise
@@ -125,14 +127,14 @@ def mkdirp(dirname, empty = False):
     # Make sure directory is writable
     try:
         os.makedirs(dirname)
-    except OSError, e:
+    except OSError as e:
         if e.errno == errno.EEXIST and os.path.isdir(dirname):
             pass
         else: raise
 
 # Common setup work
 def prepend_env(var, path):
-    if os.environ.has_key(var):
+    if var in os.environ:
         os.environ[var] = path + ":" + os.environ[var]
     else:
         os.environ[var] = path

@@ -11,7 +11,6 @@ and can be selected by changing the --step parameter. These pipelines are
 --step=4 : SLRP / Impute2
 """
 
-import commands
 from optparse import OptionParser
 import os
 import stat
@@ -20,6 +19,7 @@ import sys
 import tempfile
 import numpy as np
 import re
+import pdb
 
 from lib import common
 from lib import split_vcf_info
@@ -54,12 +54,12 @@ phase_impute_pipeline.py    --ind_ref <file containing reference individuals>
                             --perl <perl path>
 
 NOTE: steps are as follows:
-1   Beage phasing and imputation
+1   Beagle phasing and imputation
 2   MaCH phasing and imputation
 3   SHAPEIT2 phasing followed by IMPUTE2 imputation
-4   SLRP phasing followed by IMPUTE2 imputation
+4   SLRP phasing followed by IMPUTE2 imputation  Currently not working
 """
-
+#TODO all of these need to get updated
 parser = OptionParser(USAGE)
 parser.add_option('--ind_ref', help='reference individuals')
 parser.add_option('--ind_count', help='number of individuals in ref and test panel total')
@@ -77,20 +77,23 @@ parser.add_option('--chr', help='chromosome')
 parser.add_option('--qsub_id_file', help='file for job ids')
 parser.add_option('--qsub_use_testq', default='0', help='use the test queue for scheduling')
 parser.add_option('--qsub_run_locally', default='0', help='run jobs locally instead of using qsub')
-parser.add_option('--recomb_map', help='genetic recombination map', default='/srv/gs1/projects/bustamante/reference_panels/recombination_rates_hapmap_b37/genetic_map_chr22_combined_b37.txt')
-parser.add_option('--ref', default='/srv/gs1/projects/bustamante/genomes/hg19/hg19-cat/hg19.fa')
-parser.add_option('--java', default='/srv/gs1/projects/bustamante/scg3_inhousebin/java')
-parser.add_option('--gatk', default='/srv/gs1/projects/bustamante/scg3_progs/GenomeAnalysisTK-2.4-9-g532efad/GenomeAnalysisTK.jar')
-parser.add_option('--beagle', default='/srv/gs1/projects/bustamante/scg3_progs/beagle/beagle.jar')
-parser.add_option('--vcf2beagle', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/tools/bin/vcf2beagle.jar')
-parser.add_option('--mach', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/tools/bin/mach-admix')
-parser.add_option('--shapeit', default='/srv/gs1/projects/bustamante/scg3_progs/shapeit.v2.r644.linux.x86_64')
-parser.add_option('--impute2', default='/srv/gs1/software/impute/impute_v2.2.2_x86_64_static/impute2')
-parser.add_option('--slrp', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/tools/bin/SLRP')
-parser.add_option('--vcftools', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/tools/bin/vcftools')
-parser.add_option('--plink', default='/srv/gs1/projects/bustamante/inhousebin/plink')
-parser.add_option('--pseq', default='/srv/gs1/projects/bustamante/scg3_inhousebin/pseq')
-parser.add_option('--perl', default='/opt/perl/bin/perl')
+parser.add_option('--recomb_map', help='genetic recombination map', default='/home/apoursha/imputation/recombinationMaps/genetic_map_GRCH37_chr22.txt')
+parser.add_option('--ref', default='/cvmfs/ref.mugqic/genomes/species/Homo_sapiens.hg19/genome/Homo_sapiens.hg19.fa')
+parser.add_option('--java', default='/cvmfs/soft.mugqic/CentOS6/software/java/openjdk-jdk1.8.0_72/bin/java')
+parser.add_option('--gatk', default='/cvmfs/soft.mugqic/CentOS6/software/GenomeAnalysisTK/GenomeAnalysisTK-3.7/GenomeAnalysisTK.jar')
+#parser.add_option('--beagle', default='/cvmfs/soft.mugqic/CentOS6/software/beagle/beagle-03May16.862/beagle.03May16.862.jar')
+#parser.add_option('--beagle', default='/cvmfs/soft.mugqic/CentOS6/software/beagle/beagle-r1399/beagle.r1399.jar')
+parser.add_option('--beagle', default='/home/apoursha/imputation/compare_impute/src/bin/beagle.jar')
+parser.add_option('--vcf2beagle', default='/home/apoursha/imputation/compare_impute/src/vcf2beagle.jar')
+parser.add_option('--mach', default='/home/apoursha/imputation/compare_impute/src/bin/mach-admix')
+parser.add_option('--shapeit', default='/home/apoursha/imputation/compare_impute/src/bin/shapeit')
+parser.add_option('--impute2', default='/home/apoursha/imputation/compare_impute/src/bin/impute2')
+#parser.add_option('--slrp', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/tools/bin/SLRP')  #this one is hard to install
+parser.add_option('--vcftools', default='/cvmfs/soft.mugqic/CentOS6/software/vcftools/vcftools-0.1.14/bin/vcftools')
+
+parser.add_option('--plink', default='/home/apoursha/imputation/compare_impute/src/bin/plink')
+parser.add_option('--pseq', default='/home/apoursha/imputation/compare_impute/src/bin/pseq')
+parser.add_option('--perl', default='/usr/bin/perl')
 
 (options,args) = parser.parse_args()
 
@@ -139,7 +142,7 @@ def vmem(small, medium, large):
 
 ########################Step 1) Perform population phasing and imputation with Beagle######################
 def beagle():
-    
+
     prefix = os.path.join(options.intermediate_dir, '')
     test_beagle = prefix + "_unphased_test"
     ref_beagle_pattern = prefix + "_phased_ref.region%02d"
@@ -150,21 +153,20 @@ def beagle():
 
     split_info = split_vcf_info.SplitVcfInfo(options.ref_gzvcf)
     assert split_info.valid()
-
     convert_cmd = """
       VCF=$(mktemp %(vcf)s.unzip.XXXXXXXX)
       zcat %(vcf)s > $VCF
       trap "rm $VCF" EXIT   # Make sure it is cleaned up
-      
+
       #make ref.bgl.gz file
       cat $VCF | %(java)s -Xmx4g -jar %(vcf2beagle_jar)s %(beagle_prefix)s_missing_ref %(beagle_prefix)s
-      
+
       #now make markers file for beagle run (required since we have two inputs)!
       #need to only print SNPs where there is one ref and one alt allele
       if [ %(marker_file)s != "/dev/null" ]; then
         grep -v '^#' $VCF | awk 'length($4)==1 && length($5)==1 {print $3 "\t" $2 "\t" $4 "\t" $5}' > %(marker_file)s
       fi
-      
+
       trap - EXIT
       rm $VCF"""
 
@@ -179,9 +181,9 @@ def beagle():
             'marker_file': '/dev/null',
             },
         vmem = 7)
-    
+
     process_region_jobs = []
-    for i in xrange(split_info.num_regions()):
+    for i in range(split_info.num_regions()):
         convert_region_jid = common.qsub_shell_commands(
             jobname("beagle-convert-region-%d" % i),
             "Step 1b) Convert input files to beagle (region %d)" % i,
@@ -193,12 +195,12 @@ def beagle():
                 'marker_file': ref_marker_pattern % i,
             },
             vmem = 7)
-
+#changed beagle prefix from PHASED_OUT_PREFIX=%(beagle_out_prefix)s.$(basename %(phased)s)
         beagle_cmd = """
           # Beagle
           %(java)s -Xmx8g -jar %(beagle_jar)s unphased=%(unphased)s missing=? phased=%(phased)s markers=%(markers)s out=%(beagle_out_prefix)s lowmem=true
 
-          PHASED_OUT_PREFIX=%(beagle_out_prefix)s.$(basename %(phased)s)
+          PHASED_OUT_PREFIX=%(beagle_out_prefix)s.$(basename %(unphased)s)
           # Add position data from marker file to second column of results and filter out markers not in core range.
           paste <(cut -f 2 %(markers)s) ${PHASED_OUT_PREFIX}.r2 |
               awk '$1 >= %(core_starts)s && $1 <= %(core_ends)s' | awk '{t=$1;$1=$2;$2=t;print}' > %(out_prefix)s.r2
@@ -226,8 +228,8 @@ def beagle():
             queue = "extended")
         process_region_jobs.append(beagle_jid)
 
-    region_phased_gz = [ (beagle_out_pattern % i) + ".phased.gz" for i in xrange(split_info.num_regions()) ]
-    region_r2 = [ (beagle_out_pattern % i) + ".r2" for i in xrange(split_info.num_regions()) ]
+    region_phased_gz = [ (beagle_out_pattern % i) + ".phased.gz" for i in range(split_info.num_regions()) ]
+    region_r2 = [ (beagle_out_pattern % i) + ".r2" for i in range(split_info.num_regions()) ]
     combined_phased_gz = beagle_out_combined + ".phased.gz"
     combined_r2 = beagle_out_combined + ".r2"
     cmd = """
@@ -254,7 +256,7 @@ def beagle():
 
 ########################Step 3) Perform population phasing and imputation with Shapeit+Impute2######################
 def shapeit_impute():
-    
+
     #turn test vcfs into plink files for shapeit
     prefix = os.path.join(options.intermediate_dir, '')
     vcf_test = prefix + '_test.recode.vcf.gz'
@@ -264,16 +266,16 @@ def shapeit_impute():
     shapeit= prefix + '_shapeit_test'
     recomb_map = re.sub("_chr(\d+)_", '_chr' + options.chr + '_', options.recomb_map)
     test_impute2 = '_impute2_test'
-    
+
     #convert vcf to plink tped/tfam files
     cmd = ('%s --gzvcf %s --plink --out %s'
            % (options.vcftools, options.test_gzvcf, plink_test))
-    print cmd
+    print(cmd)
     job1 = common.qsub(
         jobname("vcf2plink"),
         'Step 3a) Perform population phasing and imputation with Shapeit+Impute2',
         cmd)
-        
+
     #generate shapeit reference panel
     cmd = ('%s %s -vcf %s -leghap %s -chr %s'
            % (options.perl, options.script_dir + '/lib/vcf2impute_legend_haps.pl', options.ref_gzvcf, leghap_prefix, options.chr))
@@ -288,7 +290,7 @@ def shapeit_impute():
     job3 = common.qsub(
         jobname('make_sample'),
         'Step 3c) Perform population phasing and imputation with Shapeit+Impute2', cmd)
-    
+
     #run shapeit
     cmd=('%s --input-ped %s %s --input-map %s --input-ref %s.hap.gz %s.legend.gz %s.sample --output-max %s %s'
             % (options.shapeit, plink_test + '.ped', plink_test + '.map', recomb_map, leghap_prefix, leghap_prefix, leghap_prefix, shapeit + '.hap', shapeit + '.sample'))
@@ -335,15 +337,15 @@ def mach():
        cut -f1-5,7- %(ped)s > %(ped_out)s && awk '{print \"M\", $2}' %(map)s > %(dat_out)s
     """
     make_test_merlin = common.qsub_shell_commands(
-        jobname("make_test_merlin"), 
-        "Step 2a) Create Merlin input files for reference set", 
+        jobname("make_test_merlin"),
+        "Step 2a) Create Merlin input files for reference set",
         cmd % {
             'vcftools' : options.vcftools, 'gzvcf' : options.test_gzvcf, 'ped_prefix' : test_ped_prefix,
             'ped': test_ped, 'ped_out': test_merlin_ped, 'map': test_map, 'dat_out': test_merlin_dat})
 
     cmd = "%(mach)s --phase --geno --compact --forceImputation --vcfRef --outvcf --datfile %(test_dat)s --pedfile %(test_ped)s --haps %(ref_vcf)s --outputstart %(core_starts)s --outputend %(core_ends)s --prefix %(out_prefix)s"
     process_region_jobs = []
-    for i in xrange(split_info.num_regions()):
+    for i in range(split_info.num_regions()):
         jobid = common.qsub(
             jobname("mach-region-%d" % i),
             "Step 2b) MaCH: Phase and Impute region %d" % i,
@@ -359,8 +361,8 @@ def mach():
             wait_jobs = [ make_test_merlin ])
         process_region_jobs.append(jobid)
 
-    region_output_vcfs = [ (mach_out_pattern % i) + ".vcf.gz" for i in xrange(split_info.num_regions()) ]
-    region_output_infos = [ (mach_out_pattern % i) + ".info" for i in xrange(split_info.num_regions()) ]
+    region_output_vcfs = [ (mach_out_pattern % i) + ".vcf.gz" for i in range(split_info.num_regions()) ]
+    region_output_infos = [ (mach_out_pattern % i) + ".info" for i in range(split_info.num_regions()) ]
     combined_vcf = mach_out_combined + ".vcf.gz"
     combined_info = mach_out_combined + ".info"
     cmd = """
@@ -381,12 +383,13 @@ def mach():
             'combined_info': combined_info,
         },
         wait_jobs = process_region_jobs)
-        
+
     return { 'jobs' : [combine_results],
              'files' : [ combined_vcf, combined_info ] }
 
 ########################Step 4) Perform population phasing and imputation with SLRP+Impute2######################
 def slrp_impute():
+    pass   #fuck slrp
     # Intermediate files
     prefix = options.outdir + options.outbase + "_slrp"
     test_vcf = prefix + "_test.recode.vcf"
@@ -396,7 +399,7 @@ def slrp_impute():
     # Doesn't quite work. Suffers from MemoryError
     cmd = "%(slrp)s --vcf %(vcf)s --fastPreProc --outVCF %(out)s --verbose"
     make_ref_ped = common.qsub(
-        jobname("slrp"), 
+        jobname("slrp"),
         "Step 4a) SLRP Phasing",
         cmd % {'slrp' : options.slrp, 'vcf' : ref_vcf, 'out' : slrp_out},
         is_script = True)
@@ -404,11 +407,11 @@ def slrp_impute():
 ########################Run pipeline steps########################
 def main():
     if options.step == '1':
-        output = beagle()    
+        output = beagle()
     elif options.step == '2':
         output = mach()
     elif options.step == '3':
-        output = shapeit_impute()    
+        output = shapeit_impute()
     elif options.step == '4':
         job = slrp_impute()
     # process_output()
@@ -430,7 +433,7 @@ def main():
               exit 125
             fi
         done
-        
+
         # Copy results out
         for f in $OUTPUT_FILES; do cp $f %(outdir)s/$(basename $f); done
         # Delete inetermediate
@@ -445,6 +448,6 @@ def main():
             'completed_file': options.completed_file
         },
         wait_jobs = output['jobs'])
-    
+
 if __name__ == "__main__":
     main()
