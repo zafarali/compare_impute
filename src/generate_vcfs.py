@@ -22,6 +22,8 @@ import pandas as pd
 from lib import analysis
 from lib import common
 _EPS=2e-4
+LD_SUBSAMPLER=3
+LD_SUBSAMPLER=3
 
 
 
@@ -46,9 +48,9 @@ parser.add_option('--markers_exome', default='/home/apoursha/imputation/compare_
 parser.add_option('--simulated', action='store_true')
 
 PANELS = {}
-PANELS['omni2.5', 22] = int(2388927/10)
-PANELS['affy6', 22]   = int(885501/10)
-PANELS['illumina3', 22] = int(308330/10)
+PANELS['omni2.5', 22] = int(2388927/60)
+PANELS['affy6', 22]   = int(885501/60)
+PANELS['illumina3', 22] = int(308330/60)
 
 
 (options,args) = parser.parse_args()
@@ -299,6 +301,7 @@ def make_simulated_panel(job_name_suffix, panel, ref_vcf, wait_jobs, size, panel
     panel_directory = os.path.dirname(panel)
     panel_file_name = os.path.basename(panel)
     outfile = panel_directory + "/simulated_" + panel_file_name
+    setattr(options, "markers_" + panel_name, outfile)
     if os.path.exists(outfile):
         print("Output already exists, skipping: make-fake-{}-{}".format(panel_name, job_name_suffix))
         return
@@ -330,9 +333,10 @@ def make_simulated_panel(job_name_suffix, panel, ref_vcf, wait_jobs, size, panel
     pos = np.array(freq.CHROM)
     freq = np.array(freq['{FREQ}'])
     freq[freq > 0.5] = 1.0 - freq[freq > 0.5] # get minor allele frequency
-    freq[freq == 0]  = _EPS
+    #freq[freq == 0]  = _EPS
     freq = freq / np.sum(freq)
-    locations = np.random.choice(range(freq.shape[0]), size=size, replace=False, p = freq)
+    locations = np.random.choice(range(freq.shape[0]), size=LD_SUBSAMPLER * size, replace=False, p = freq)
+    locations = locations[0::LD_SUBSAMPLER]
     locations = np.sort(locations)
     del freq
     with open(outfile, 'w') as fp:
@@ -341,7 +345,6 @@ def make_simulated_panel(job_name_suffix, panel, ref_vcf, wait_jobs, size, panel
                 'ch' : chrom[location],
                 'pos' : pos[location]})
         fp.close()
-    setattr(options, "marker_" + panel_name, outfile)
 
 def sample_simulated_test_data_vcfs(job_name_suffix, chrom, ref_vcf, item,
         iteration, test_vcf, make_ref_jid, make_test_jid):
@@ -371,7 +374,6 @@ def sample_simulated_test_data_vcfs(job_name_suffix, chrom, ref_vcf, item,
         item.vcf_filename(analysis.T_TEST_OMNI, chrom, iteration),
         "--gzvcf %s --snps %s" % (test_vcf, options.markers_omni),
         wait_jobs = [make_test_jid])
-
 
 
 

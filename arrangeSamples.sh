@@ -18,7 +18,7 @@ mv xab $popFolder/CEU
 mv xac $popFolder/CHB
 
 python src/generate_vcfs.py --simulated
-#python src/generate_impute_results.py --runonly= --arrays=affy,omni,illumina --types=c --steps=1 --dry_run 0
+python src/generate_impute_results.py --runonly= --arrays=affy,omni,illumina --types=c --steps=3 --dry_run 0 --phased
 
 #python src/phase_impute_pipeline.py --step 1
 

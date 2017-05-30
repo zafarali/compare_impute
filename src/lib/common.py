@@ -13,6 +13,8 @@ import stat
 import sys
 import time
 import tempfile
+import pdb
+
 
 class Config(object):
     SCRIPT_LOG = None
@@ -48,7 +50,7 @@ def run(info, cmd):
     logFile = open(CONFIG.SCRIPT_LOG, 'a')
     logFile.write(header + "\n")
     logFile.close()
-
+    #pdb.set_trace()
     exit_status, stdout = subprocess.getstatusoutput(cmd)
     end_time = time.time()
 

@@ -52,6 +52,7 @@ phase_impute_pipeline.py    --ind_ref <file containing reference individuals>
                             --plink <plink path>
                             --pseq <pseq path>
                             --perl <perl path>
+                            --phased
 
 NOTE: steps are as follows:
 1   Beagle phasing and imputation
@@ -59,7 +60,6 @@ NOTE: steps are as follows:
 3   SHAPEIT2 phasing followed by IMPUTE2 imputation
 4   SLRP phasing followed by IMPUTE2 imputation  Currently not working
 """
-#TODO all of these need to get updated
 parser = OptionParser(USAGE)
 parser.add_option('--ind_ref', help='reference individuals')
 parser.add_option('--ind_count', help='number of individuals in ref and test panel total')
@@ -94,9 +94,10 @@ parser.add_option('--vcftools', default='/cvmfs/soft.mugqic/CentOS6/software/vcf
 parser.add_option('--plink', default='/home/apoursha/imputation/compare_impute/src/bin/plink')
 parser.add_option('--pseq', default='/home/apoursha/imputation/compare_impute/src/bin/pseq')
 parser.add_option('--perl', default='/usr/bin/perl')
+parser.add_option('--phased', action='store_true')
 
 (options,args) = parser.parse_args()
-
+#pdb.set_trace()
 #perform cursory checks that we have all required arguments
 if options.ind_ref is None:
     parser.error('ind_ref is not given')
@@ -196,10 +197,26 @@ def beagle():
             },
             vmem = 7)
 #changed beagle prefix from PHASED_OUT_PREFIX=%(beagle_out_prefix)s.$(basename %(phased)s)
-        beagle_cmd = """
-          # Beagle
-          %(java)s -Xmx8g -jar %(beagle_jar)s unphased=%(unphased)s missing=? phased=%(phased)s markers=%(markers)s out=%(beagle_out_prefix)s lowmem=true
+        if options.phased:
+            beagle_cmd = """{java} -Xmx8g -jar {beagle_jar} phased={to_impute} missing=? phased={phased} markers={markers} out={beagle_out_prefix} lowmem=true
+            """.format(
+                    java      = options.java,
+                    beagle_jar= options.beagle,
+                    to_impute = test_beagle + ".bgl.gz",
+                    phased    = (ref_beagle_pattern % i) + ".bgl.gz",
+                    markers   = ref_marker_pattern % i,
+                    beagle_out_prefix= beagle_out_pattern % i)
+        else:
+            beagle_cmd = """%(java)s -Xmx8g -jar %(beagle_jar)s unphased=%(unphased)s missing=? phased=%(phased)s markers=%(markers)s out=%(beagle_out_prefix)s lowmem=true
+            """.format(
+                java= options.java,
+                beagle_jar= options.beagle,
+                unphased= test_beagle + ".bgl.gz",
+                phased= (ref_beagle_pattern % i) + ".bgl.gz",
+                markers= ref_marker_pattern % i,
+                beagle_out_prefix= beagle_out_pattern % i)
 
+        beagle_cmd += """
           PHASED_OUT_PREFIX=%(beagle_out_prefix)s.$(basename %(unphased)s)
           # Add position data from marker file to second column of results and filter out markers not in core range.
           paste <(cut -f 2 %(markers)s) ${PHASED_OUT_PREFIX}.r2 |
@@ -213,10 +230,7 @@ def beagle():
             jobname("beagle-impute-region-%d" % i),
             "Step 1c) Perform phasing and imputation with Beagle",
             beagle_cmd % {
-                'java': options.java,
-                'beagle_jar': options.beagle,
                 'unphased': test_beagle + ".bgl.gz",
-                'phased': (ref_beagle_pattern % i) + ".bgl.gz",
                 'markers': ref_marker_pattern % i,
                 'beagle_out_prefix': beagle_out_pattern % i,
                 'core_starts': split_info.core_boundaries(i)[0],
@@ -238,8 +252,8 @@ def beagle():
       cat %(all_r2)s >> %(combined_r2)s
     """
     combine_results = common.qsub_shell_commands(
-        jobname("mach-combine-results"),
-        "Step 2c) Combine MaCH results",
+        jobname("beagle-combine-results"),
+        "Step 2d) Combine beagle results",
         cmd % {
             'first_phased_gz': region_phased_gz[0],
             'all_phased_gz': " ".join(region_phased_gz),
@@ -267,6 +281,7 @@ def shapeit_impute():
     recomb_map = re.sub("_chr(\d+)_", '_chr' + options.chr + '_', options.recomb_map)
     test_impute2 = '_impute2_test'
 
+    #pdb.set_trace()
     #convert vcf to plink tped/tfam files
     cmd = ('%s --gzvcf %s --plink --out %s'
            % (options.vcftools, options.test_gzvcf, plink_test))
@@ -282,7 +297,7 @@ def shapeit_impute():
     job2 = common.qsub(
         jobname("make_shapeit_ref"),
         'Step 3b) Perform population phasing and imputation with Shapeit+Impute2', cmd)
-
+    pdb.set_trace()
     # does this need qsubbing?
     #make minimal .sample file to use reference panel in phasing
     cmd = ('sh %s/lib/make_sample.sh %s %s'
@@ -326,6 +341,7 @@ def mach():
     test_merlin_ped = prefix + "_test_merlin.ped"
     test_merlin_dat = prefix + "_test_merlin.dat"
 
+    #pdb.set_trace()
     mach_out_combined = prefix + "_mach_imputed"
     mach_out_pattern = mach_out_combined + ".region%02d"
 
@@ -343,7 +359,9 @@ def mach():
             'vcftools' : options.vcftools, 'gzvcf' : options.test_gzvcf, 'ped_prefix' : test_ped_prefix,
             'ped': test_ped, 'ped_out': test_merlin_ped, 'map': test_map, 'dat_out': test_merlin_dat})
 
-    cmd = "%(mach)s --phase --geno --compact --forceImputation --vcfRef --outvcf --datfile %(test_dat)s --pedfile %(test_ped)s --haps %(ref_vcf)s --outputstart %(core_starts)s --outputend %(core_ends)s --prefix %(out_prefix)s"
+    cmd = "%(mach)s --geno --compact --forceImputation --vcfRef --outvcf --datfile %(test_dat)s --pedfile %(test_ped)s --haps %(ref_vcf)s --outputstart %(core_starts)s --outputend %(core_ends)s --prefix %(out_prefix)s"
+    if not options.phased:
+        cmd += " --phase"
     process_region_jobs = []
     for i in range(split_info.num_regions()):
         jobid = common.qsub(
@@ -406,6 +424,7 @@ def slrp_impute():
 
 ########################Run pipeline steps########################
 def main():
+    #pdb.set_trace()
     if options.step == '1':
         output = beagle()
     elif options.step == '2':
