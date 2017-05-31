@@ -77,7 +77,7 @@ parser.add_option('--chr', help='chromosome')
 parser.add_option('--qsub_id_file', help='file for job ids')
 parser.add_option('--qsub_use_testq', default='0', help='use the test queue for scheduling')
 parser.add_option('--qsub_run_locally', default='0', help='run jobs locally instead of using qsub')
-parser.add_option('--recomb_map', help='genetic recombination map', default='/home/apoursha/imputation/recombinationMaps/genetic_map_GRCH37_chr22.txt')
+parser.add_option('--recomb_map', help='genetic recombination map', default='/home/apoursha/imputation/recombinationMaps/genetic_map_GRCh37_chr22.txt')
 parser.add_option('--ref', default='/cvmfs/ref.mugqic/genomes/species/Homo_sapiens.hg19/genome/Homo_sapiens.hg19.fa')
 parser.add_option('--java', default='/cvmfs/soft.mugqic/CentOS6/software/java/openjdk-jdk1.8.0_72/bin/java')
 parser.add_option('--gatk', default='/cvmfs/soft.mugqic/CentOS6/software/GenomeAnalysisTK/GenomeAnalysisTK-3.7/GenomeAnalysisTK.jar')
@@ -95,9 +95,9 @@ parser.add_option('--plink', default='/home/apoursha/imputation/compare_impute/s
 parser.add_option('--pseq', default='/home/apoursha/imputation/compare_impute/src/bin/pseq')
 parser.add_option('--perl', default='/usr/bin/perl')
 parser.add_option('--phased', action='store_true')
+parser.add_option('--first_last', default='/home/apoursha/imputation/compare_impute/data/hg19_chromInfo_view.csv')
 
 (options,args) = parser.parse_args()
-#pdb.set_trace()
 #perform cursory checks that we have all required arguments
 if options.ind_ref is None:
     parser.error('ind_ref is not given')
@@ -270,10 +270,11 @@ def beagle():
 
 ########################Step 3) Perform population phasing and imputation with Shapeit+Impute2######################
 def shapeit_impute():
+    #TODO the string formatting here is pretty horrible.
+    #same for run_impute2
 
     #turn test vcfs into plink files for shapeit
     prefix = os.path.join(options.intermediate_dir, '')
-    vcf_test = prefix + '_test.recode.vcf.gz'
     vcf_ref = prefix + '_ref.recode.vcf.gz'
     plink_test = prefix + '_test'
     leghap_prefix = prefix + '_ref.haplotypes'
@@ -281,23 +282,12 @@ def shapeit_impute():
     recomb_map = re.sub("_chr(\d+)_", '_chr' + options.chr + '_', options.recomb_map)
     test_impute2 = '_impute2_test'
 
-    #pdb.set_trace()
-    #convert vcf to plink tped/tfam files
-    cmd = ('%s --gzvcf %s --plink --out %s'
-           % (options.vcftools, options.test_gzvcf, plink_test))
-    print(cmd)
-    job1 = common.qsub(
-        jobname("vcf2plink"),
-        'Step 3a) Perform population phasing and imputation with Shapeit+Impute2',
-        cmd)
-
     #generate shapeit reference panel
     cmd = ('%s %s -vcf %s -leghap %s -chr %s'
            % (options.perl, options.script_dir + '/lib/vcf2impute_legend_haps.pl', options.ref_gzvcf, leghap_prefix, options.chr))
     job2 = common.qsub(
         jobname("make_shapeit_ref"),
         'Step 3b) Perform population phasing and imputation with Shapeit+Impute2', cmd)
-    pdb.set_trace()
     # does this need qsubbing?
     #make minimal .sample file to use reference panel in phasing
     cmd = ('sh %s/lib/make_sample.sh %s %s'
@@ -307,24 +297,22 @@ def shapeit_impute():
         'Step 3c) Perform population phasing and imputation with Shapeit+Impute2', cmd)
 
     #run shapeit
-    cmd=('%s --input-ped %s %s --input-map %s --input-ref %s.hap.gz %s.legend.gz %s.sample --output-max %s %s'
-            % (options.shapeit, plink_test + '.ped', plink_test + '.map', recomb_map, leghap_prefix, leghap_prefix, leghap_prefix, shapeit + '.hap', shapeit + '.sample'))
+    cmd=('%s --input-vcf %s --input-map %s --input-ref %s.hap.gz %s.legend.gz %s.sample --output-max %s %s'
+            % (options.shapeit, options.test_gzvcf, recomb_map, leghap_prefix, leghap_prefix, leghap_prefix, shapeit + '.hap', shapeit + '.sample'))
     job4 = common.qsub(
         jobname('shapeit2'),
         'Step 3d) Perform population phasing and imputation with Shapeit+Impute2', cmd,
-        wait_jobs = [job1, job2, job3])
+        wait_jobs = [job2, job3])
 
     #chunk and submit impute2 jobs
-    cmd=('python %s/run_impute2.py --job %s --first_last %s --chr %s --test_hap %s --ref_hap %s.hap.gz --ref_legend %s.legend.gz --map %s --log %s --impute2_bin %s --out %s --wd %s'
-         % (options.script_dir + '/lib', job4, options.script_dir + '/data/hg19_chromInfo_view.csv', options.chr, shapeit + '.hap', leghap_prefix, leghap_prefix, recomb_map, options.logs, options.impute2, test_impute2, prefix))
+    job_ids = execute_impute2(test_hap=shapeit+'.hap', ref_hap=leghap_prefix+'.hap.gz',
+            ref_legend=leghap_prefix+'.legend.gz', recomb_map=recomb_map,
+            output=prefix+test_impute2, chrom=options.chr, first_last=options.first_last, jobs=job4,
+            wd=prefix)
 
-
-    stdout = common.run("Invoking run_impute2.py", cmd)
-    # Script runs several qsub and output is in column 3
-    job_ids = [line.split()[2] for line in stdout.splitlines() if re.match(r'^Your job.*has been submitted$', line)]
     f = open(common.CONFIG.QSUB_ID_FILE, 'w')
-    for id in job_ids:
-        f.write("%s\n" % id)
+    for jid in job_ids:
+        f.write("%s\n" % jid)
     f.close()
     return {
         'jobs': job_ids,
@@ -341,7 +329,6 @@ def mach():
     test_merlin_ped = prefix + "_test_merlin.ped"
     test_merlin_dat = prefix + "_test_merlin.dat"
 
-    #pdb.set_trace()
     mach_out_combined = prefix + "_mach_imputed"
     mach_out_pattern = mach_out_combined + ".region%02d"
 
@@ -422,9 +409,70 @@ def slrp_impute():
         cmd % {'slrp' : options.slrp, 'vcf' : ref_vcf, 'out' : slrp_out},
         is_script = True)
 
+def execute_impute2(test_hap, ref_hap, ref_legend, recomb_map,
+        output, jobs, chrom, first_last, wd, int_size=5e6):
+    chrom_dict = {}
+    with open(first_last, 'r') as fl:
+        first_last = fl.readlines()
+        for line in first_last:
+            line = line.strip().split(',')
+            chrom_dict[line[0].lstrip('chr')] = line[1]
+    pos1 = 1
+    last_pos     = int(chrom_dict[chrom])
+    grid_spacing = (last_pos - pos1) / float(int_size)
+    intervals    = np.linspace(pos1 - 1, last_pos, grid_spacing)
+    all_jobs, all_iters, all_info = [], [], []
+    #pdb.set_trace()
+    for i in range(len(intervals)-1):
+        outfile = output + '_iter' + str(i)
+        cmd = '{impute2} -known_haps_g {test_haps} -m {map} -int {start} {end} -h {ref_hap} -l {legend} -o {outfile}'.format(
+            impute2  = options.impute2,
+            test_haps= test_hap,
+            map      = recomb_map,
+            start    = int(intervals[i] + 1),
+            end      = int(intervals[i + 1]),
+            ref_hap  = ref_hap,
+            legend   = ref_legend,
+            outfile  = outfile
+        )
+        job_id = common.qsub("impute2_{}".format(i),
+            "submitting region {}".format(i),
+            cmd,
+            wait_jobs = jobs,
+            logdir = wd
+        )
+        all_jobs.append(job_id)
+        all_iters.append(outfile)
+        all_info.append(outfile + '_info')
+
+    cmd = 'cat {} | gzip > {}.gz'.format(
+            ' '.join(all_iters),
+            output
+            )
+    job_id_impute = common.qsub_shell_commands(
+            "cat-job",
+            "Combining various impute2 files:\n",
+            cmd,
+            wait_jobs = all_jobs,
+            logdir = wd
+            )
+    # combine info files
+    cmd = """tail -n +2 {info} | sed '/^$/d' | grep -v == > {out}.gz.info""".format(
+            out = output,
+            info = ' '.join(all_info)
+            )
+    job_id_info = common.qsub_shell_commands(
+            "info-concat",
+            "Combining various impute2 info files:\n ",
+            cmd,
+            wait_jobs = all_jobs,
+            logdir = wd
+            )
+    return job_id_impute, job_id_info
+
+
 ########################Run pipeline steps########################
 def main():
-    #pdb.set_trace()
     if options.step == '1':
         output = beagle()
     elif options.step == '2':
@@ -433,7 +481,6 @@ def main():
         output = shapeit_impute()
     elif options.step == '4':
         job = slrp_impute()
-    # process_output()
     common.qsub_shell_commands(
         jobname("finalize"),
         "Copy results and cleanup",
