@@ -23,6 +23,7 @@ import pdb
 
 from lib import common
 from lib import split_vcf_info
+HOME='/sb/project/ams-754-aa/apoursh_projects/imputation/compare_impute'
 
 USAGE = """
 phase_impute_pipeline.py    --ind_ref <file containing reference individuals>
@@ -77,25 +78,25 @@ parser.add_option('--chr', help='chromosome')
 parser.add_option('--qsub_id_file', help='file for job ids')
 parser.add_option('--qsub_use_testq', default='0', help='use the test queue for scheduling')
 parser.add_option('--qsub_run_locally', default='0', help='run jobs locally instead of using qsub')
-parser.add_option('--recomb_map', help='genetic recombination map', default='/home/apoursha/imputation/recombinationMaps/genetic_map_GRCh37_chr22.txt')
+parser.add_option('--recomb_map', help='genetic recombination map', default=HOME + '/../recombinationMaps/genetic_map_GRCh37_chr22.txt')
 parser.add_option('--ref', default='/cvmfs/ref.mugqic/genomes/species/Homo_sapiens.hg19/genome/Homo_sapiens.hg19.fa')
 parser.add_option('--java', default='/cvmfs/soft.mugqic/CentOS6/software/java/openjdk-jdk1.8.0_72/bin/java')
 parser.add_option('--gatk', default='/cvmfs/soft.mugqic/CentOS6/software/GenomeAnalysisTK/GenomeAnalysisTK-3.7/GenomeAnalysisTK.jar')
 #parser.add_option('--beagle', default='/cvmfs/soft.mugqic/CentOS6/software/beagle/beagle-03May16.862/beagle.03May16.862.jar')
 #parser.add_option('--beagle', default='/cvmfs/soft.mugqic/CentOS6/software/beagle/beagle-r1399/beagle.r1399.jar')
-parser.add_option('--beagle', default='/home/apoursha/imputation/compare_impute/src/bin/beagle.jar')
-parser.add_option('--vcf2beagle', default='/home/apoursha/imputation/compare_impute/src/vcf2beagle.jar')
-parser.add_option('--mach', default='/home/apoursha/imputation/compare_impute/src/bin/mach-admix')
-parser.add_option('--shapeit', default='/home/apoursha/imputation/compare_impute/src/bin/shapeit')
-parser.add_option('--impute2', default='/home/apoursha/imputation/compare_impute/src/bin/impute2')
+parser.add_option('--beagle', default=HOME + '/src/bin/beagle.jar')
+parser.add_option('--vcf2beagle', default=HOME + '/src/vcf2beagle.jar')
+parser.add_option('--mach', default=HOME + '/src/bin/mach-admix')
+parser.add_option('--shapeit', default=HOME + '/src/bin/shapeit')
+parser.add_option('--impute2', default=HOME + '/src/bin/impute2')
 #parser.add_option('--slrp', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/tools/bin/SLRP')  #this one is hard to install
 parser.add_option('--vcftools', default='/cvmfs/soft.mugqic/CentOS6/software/vcftools/vcftools-0.1.14/bin/vcftools')
 
-parser.add_option('--plink', default='/home/apoursha/imputation/compare_impute/src/bin/plink')
-parser.add_option('--pseq', default='/home/apoursha/imputation/compare_impute/src/bin/pseq')
+parser.add_option('--plink', default=HOME + '/src/bin/plink')
+parser.add_option('--pseq', default=HOME + '/src/bin/pseq')
 parser.add_option('--perl', default='/usr/bin/perl')
 parser.add_option('--phased', action='store_true')
-parser.add_option('--first_last', default='/home/apoursha/imputation/compare_impute/data/hg19_chromInfo_view.csv')
+parser.add_option('--first_last', default=HOME+'/data/hg19_chromInfo_view.csv')
 
 (options,args) = parser.parse_args()
 #perform cursory checks that we have all required arguments
@@ -271,38 +272,44 @@ def beagle():
 ########################Step 3) Perform population phasing and imputation with Shapeit+Impute2######################
 def shapeit_impute():
     #TODO the string formatting here is pretty horrible.
+    #TODO these should all share their ref phasing
     #same for run_impute2
 
     #turn test vcfs into plink files for shapeit
     prefix = os.path.join(options.intermediate_dir, '')
-    vcf_ref = prefix + '_ref.recode.vcf.gz'
     plink_test = prefix + '_test'
     leghap_prefix = prefix + '_ref.haplotypes'
     shapeit= prefix + '_shapeit_test'
     recomb_map = re.sub("_chr(\d+)_", '_chr' + options.chr + '_', options.recomb_map)
     test_impute2 = '_impute2_test'
 
-    #generate shapeit reference panel
-    cmd = ('%s %s -vcf %s -leghap %s -chr %s'
-           % (options.perl, options.script_dir + '/lib/vcf2impute_legend_haps.pl', options.ref_gzvcf, leghap_prefix, options.chr))
-    job2 = common.qsub(
-        jobname("make_shapeit_ref"),
-        'Step 3b) Perform population phasing and imputation with Shapeit+Impute2', cmd)
-    # does this need qsubbing?
-    #make minimal .sample file to use reference panel in phasing
-    cmd = ('sh %s/lib/make_sample.sh %s %s'
-           % (options.script_dir, leghap_prefix + '.sample', options.ind_ref))
-    job3 = common.qsub(
-        jobname('make_sample'),
-        'Step 3c) Perform population phasing and imputation with Shapeit+Impute2', cmd)
+    if  not options.phased:
+        #generate shapeit reference panel
+        cmd = ('%s %s -vcf %s -leghap %s -chr %s'
+               % (options.perl, options.script_dir + '/lib/vcf2impute_legend_haps.pl', options.ref_gzvcf, leghap_prefix, options.chr))
+        job2 = common.qsub(
+            jobname("make_shapeit_ref"),
+            'Step 3b) Perform population phasing and imputation with Shapeit+Impute2', cmd)
+        # does this need qsubbing?
+        #make minimal .sample file to use reference panel in phasing
+        cmd = ('sh %s/lib/make_sample.sh %s %s'
+               % (options.script_dir, leghap_prefix + '.sample', options.ind_ref))
+        job3 = common.qsub(
+            jobname('make_sample'),
+            'Step 3c) Perform population phasing and imputation with Shapeit+Impute2', cmd)
 
-    #run shapeit
-    cmd=('%s --input-vcf %s --input-map %s --input-ref %s.hap.gz %s.legend.gz %s.sample --output-max %s %s'
-            % (options.shapeit, options.test_gzvcf, recomb_map, leghap_prefix, leghap_prefix, leghap_prefix, shapeit + '.hap', shapeit + '.sample'))
-    job4 = common.qsub(
-        jobname('shapeit2'),
-        'Step 3d) Perform population phasing and imputation with Shapeit+Impute2', cmd,
-        wait_jobs = [job2, job3])
+        #run shapeit
+        cmd=('%s --input-vcf %s --input-map %s --input-ref %s.hap.gz %s.legend.gz %s.sample --output-max %s %s'
+                % (options.shapeit, options.test_gzvcf, recomb_map, leghap_prefix, leghap_prefix, leghap_prefix, shapeit + '.hap', shapeit + '.sample'))
+        job4 = common.qsub(
+            jobname('shapeit2'),
+            'Step 3d) Perform population phasing and imputation with Shapeit+Impute2', cmd,
+            wait_jobs = [job2, job3])
+
+    else:
+        ref_vcf = options.ref_gzvcf
+        test_vcf = options.test_gzvcf
+        job4 = extract_phase_from_vcf(test_vcf, ref_vcf, shapeit+'.hap', leghap_prefix)
 
     #chunk and submit impute2 jobs
     job_ids = execute_impute2(test_hap=shapeit+'.hap', ref_hap=leghap_prefix+'.hap.gz',
@@ -318,6 +325,44 @@ def shapeit_impute():
         'jobs': job_ids,
         'files': [ os.path.join(prefix, test_impute2 + ".gz"), os.path.join(prefix, test_impute2 + '.gz.info') ]
     }
+
+def extract_phase_from_vcf(test_vcfName, ref_vcfName, test_outname,
+        ref_outname,format='shapeit2'):
+    """Extracts the phasing and writes files in a particular format with outname as the name of the file. The function returns the job_id for the submitted job. Takes gzipped vcfs, returns gzipped ref file.
+    """
+    if format == 'shapeit2':
+        if not os.path.exists(test_outname):
+            cmd = """zcat {gzvcf} | grep -v '^#' | cut -f 6-9 --complement | awk ' {{ t = $2; $2 = $3; $3 = t; print; }} ' | sed 's/|\|\t/ /g' > {outfile}"""
+            jid1 = common.qsub_shell_commands(
+            jobname("extract-phase-info"),
+            "Step 3b) Extract phasing info from test vcf: ",
+            cmd.format(
+                    gzvcf = test_vcfName,
+                    outfile    = test_outname)
+            )
+        #check if the reference phasing exists
+        if not os.path.exists(ref_outname + ".hap.gz"):
+            cmd = """zcat {gzvcf} | grep -v '^#' | cut -f 1-9 --complement | sed 's/|\|\t/ /g' | gzip -c > {outfile}.gz """
+
+            legend_cmd = """echo -e id \t position\t a0\t a1 > {outname} &&
+            zcat {gzvcf} | grep -v '^#' | awk '{{print $3, $2, $4, $5}}' >> {outname} &&
+            gzip {outname}"""
+            cmd += '&&\n' + legend_cmd
+            jid2 = common.qsub_shell_commands(
+            jobname("extract-phase-info"),
+            "Step 3c) Extract phasing info from test vcf: ",
+            cmd.format(
+                    gzvcf      = ref_vcfName,
+                    outfile    = ref_outname + '.hap',
+                    outname    = ref_outname + '.legend')
+            )
+
+        return(jid1,jid2)
+
+
+
+
+
 
 ########################Step 2) Perform population phasing and imputation with MaCH######################
 def mach():
