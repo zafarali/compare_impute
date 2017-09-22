@@ -53,7 +53,8 @@ phase_impute_pipeline.py    --ind_ref <file containing reference individuals>
                             --plink <plink path>
                             --pseq <pseq path>
                             --perl <perl path>
-                            --phased
+                            --test-phased
+                            --ref-phased
 
 NOTE: steps are as follows:
 1   Beagle phasing and imputation
@@ -95,7 +96,8 @@ parser.add_option('--vcftools', default='/cvmfs/soft.mugqic/CentOS6/software/vcf
 parser.add_option('--plink', default=HOME + '/src/bin/plink')
 parser.add_option('--pseq', default=HOME + '/src/bin/pseq')
 parser.add_option('--perl', default='/usr/bin/perl')
-parser.add_option('--phased', action='store_true')
+parser.add_option('--test-phased', action='store_true')
+parser.add_option('--ref-phased', action='store_true')
 parser.add_option('--first_last', default=HOME+'/data/hg19_chromInfo_view.csv')
 
 (options,args) = parser.parse_args()
@@ -269,6 +271,41 @@ def beagle():
         'files': [ combined_phased_gz, combined_r2 ]
     }
 
+
+def shapeit_with_phased_ref(plink_test, leghap_prefix, recomb_map, shapeit):
+    cmd = ('%s --gzvcf %s --plink --out %s'
+            % (options.vcftools, options.test_gzvcf, plink_test))
+    print(cmd)
+    job1 = common.qsub(jobname("vcf2plink"),
+            'Step 3a) Perform population phasing and imputation with Shapeit+Impute2',
+            cmd)
+    #generate shapeit reference panel
+    cmd = ('%s %s -vcf %s -leghap %s -chr %s'
+               % (options.perl, options.script_dir + '/lib/vcf2impute_legend_haps.pl', options.ref_gzvcf, leghap_prefix, options.chr))
+    job2 = common.qsub(
+        jobname("make_shapeit_ref"),
+        'Step 3b) Perform population phasing and imputation with Shapeit+Impute2', cmd)
+    # does this need qsubbing?
+    #make minimal .sample file to use reference panel in phasing
+    cmd = ('sh %s/lib/make_sample.sh %s %s'
+           % (options.script_dir, leghap_prefix + '.sample', options.ind_ref))
+    job3 = common.qsub(
+        jobname('make_sample'),
+        'Step 3c) Perform population phasing and imputation with Shapeit+Impute2', cmd)
+
+    #run shapeit
+    cmd=('%s --input-vcf %s --input-map %s --input-ref %s.hap.gz %s.legend.gz %s.sample --output-max %s %s'
+            % (options.shapeit, options.test_gzvcf, recomb_map, leghap_prefix, leghap_prefix, leghap_prefix, shapeit + '.hap', shapeit + '.sample'))
+    job4 = common.qsub(
+        jobname('shapeit2'),
+        'Step 3d) Perform population phasing and imputation with Shapeit+Impute2', cmd,
+        wait_jobs = [job2, job3])
+    return job4
+
+
+
+
+
 ########################Step 3) Perform population phasing and imputation with Shapeit+Impute2######################
 def shapeit_impute():
     #TODO the string formatting here is pretty horrible.
@@ -277,46 +314,38 @@ def shapeit_impute():
 
     #turn test vcfs into plink files for shapeit
     prefix = os.path.join(options.intermediate_dir, '')
-    plink_test = prefix + '_test'
     leghap_prefix = prefix + '_ref.haplotypes'
     shapeit= prefix + '_shapeit_test'
     recomb_map = re.sub("_chr(\d+)_", '_chr' + options.chr + '_', options.recomb_map)
     test_impute2 = '_impute2_test'
 
-    if  not options.phased:
-        #generate shapeit reference panel
-        cmd = ('%s %s -vcf %s -leghap %s -chr %s'
-               % (options.perl, options.script_dir + '/lib/vcf2impute_legend_haps.pl', options.ref_gzvcf, leghap_prefix, options.chr))
-        job2 = common.qsub(
-            jobname("make_shapeit_ref"),
-            'Step 3b) Perform population phasing and imputation with Shapeit+Impute2', cmd)
-        # does this need qsubbing?
-        #make minimal .sample file to use reference panel in phasing
-        cmd = ('sh %s/lib/make_sample.sh %s %s'
-               % (options.script_dir, leghap_prefix + '.sample', options.ind_ref))
-        job3 = common.qsub(
-            jobname('make_sample'),
-            'Step 3c) Perform population phasing and imputation with Shapeit+Impute2', cmd)
-
-        #run shapeit
-        cmd=('%s --input-vcf %s --input-map %s --input-ref %s.hap.gz %s.legend.gz %s.sample --output-max %s %s'
-                % (options.shapeit, options.test_gzvcf, recomb_map, leghap_prefix, leghap_prefix, leghap_prefix, shapeit + '.hap', shapeit + '.sample'))
-        job4 = common.qsub(
-            jobname('shapeit2'),
-            'Step 3d) Perform population phasing and imputation with Shapeit+Impute2', cmd,
-            wait_jobs = [job2, job3])
-
-    else:
+    if options.ref_phased and not options.test_phased:
+        plink_test = prefix + '_test'
+        phase_job_id = shapeit_with_phased_ref(plink_test, leghap_prefix, recomb_map, shapeit)
+    elif options.test_phased and options.ref_phased:
         ref_vcf = options.ref_gzvcf
         test_vcf = options.test_gzvcf
-        job4 = extract_phase_from_vcf(test_vcf, ref_vcf, shapeit+'.hap', leghap_prefix)
+        phase_job_id = extract_phase_from_vcf(test_vcf, ref_vcf, shapeit+'.hap', leghap_prefix)
 
-    #chunk and submit impute2 jobs
-    job_ids = execute_impute2(test_hap=shapeit+'.hap', ref_hap=leghap_prefix+'.hap.gz',
-            ref_legend=leghap_prefix+'.legend.gz', recomb_map=recomb_map,
-            output=prefix+test_impute2, chrom=options.chr, first_last=options.first_last, jobs=job4,
-            wd=prefix)
+    elif not options.test_phased and not options.ref_phased:
+        ref_vcf = options.ref_gzvcf
+        test_vcf = options.test_gzvcf
+        impute2_with_neither_phased(ref_vcfName=ref_vcf, test_vcfName=test_vcf,
+                g_ref=prefix+'_gref', g_test=prefix+'_gtest')
 
+    #run impute2 with phased ref file
+    if options.ref_phased:
+        #chunk and submit impute2 jobs
+        job_ids = execute_impute2(test_hap=shapeit+'.hap', ref_hap=leghap_prefix+'.hap.gz',
+                ref_legend=leghap_prefix+'.legend.gz', recomb_map=recomb_map,
+                output=prefix+test_impute2, chrom=options.chr, first_last=options.first_last, jobs=phase_job_id,
+                wd=prefix)
+
+    else:
+        job_ids = execute_impute2(test_hap=prefix+'_gtest.gz', ref_hap=prefix+'_gref.gz',
+                ref_legend=None, recomb_map=recomb_map,
+                output=prefix+test_impute2, chrom=options.chr, first_last=options.first_last, jobs=None,
+                wd=prefix, test_phased=False, ref_phased=False)
     f = open(common.CONFIG.QSUB_ID_FILE, 'w')
     for jid in job_ids:
         f.write("%s\n" % jid)
@@ -328,7 +357,7 @@ def shapeit_impute():
 
 def extract_phase_from_vcf(test_vcfName, ref_vcfName, test_outname,
         ref_outname,format='shapeit2'):
-    """Extracts the phasing and writes files in a particular format with outname as the name of the file. The function returns the job_id for the submitted job. Takes gzipped vcfs, returns gzipped ref file.
+    """Extracts the phasing and writes files in a particular format with outname as the name of the file. The function returns the job_id for the submitted job.
     """
     if format == 'shapeit2':
         if not os.path.exists(test_outname):
@@ -360,7 +389,29 @@ def extract_phase_from_vcf(test_vcfName, ref_vcfName, test_outname,
         return(jid1,jid2)
 
 
-
+def impute2_with_neither_phased(ref_vcfName, g_ref, test_vcfName, g_test):
+    jobs = []
+    if not os.path.exists(g_ref):
+        cmd = """zcat {gzvcf} | grep -v '^#' | cut -f 6-9 --complement | awk ' {{ t = $2; $2 = $3; $3 = t; print;}} ' | sed 's/0\/0/1 0 0/g' | sed 's/0\/1\|1\/0/0 1 0/g' | sed 's/1\/1/0 0 1/g' | gzip -c > {ref_out}.gz"""
+        jid1 = common.qsub_shell_commands(
+                jobname("extract-ref-file"),
+                "Step 3a) Extract ref data: ",
+                cmd.format(
+                    gzvcf = ref_vcfName,
+                    ref_out = g_ref)
+                )
+        jobs.append(jid1)
+    if not os.path.exists(g_test):
+        cmd = """zcat {gzvcf} | grep -v '^#' | cut -f 6-9 --complement | awk ' {{ t = $2; $2 = $3; $3 = t; print;}} ' | sed 's/0\/0/1 0 0/g' | sed 's/0\/1\|1\/0/0 1 0/g' | sed 's/1\/1/0 0 1/g' | gzip -c > {ref_out}.gz"""
+        jid2 = common.qsub_shell_commands(
+                jobname("extract-ref-file"),
+                "Step 3a) Extract ref data: ",
+                cmd.format(
+                    gzvcf = test_vcfName,
+                    ref_out = g_test)
+                )
+        jobs.append(jid2)
+    return jobs
 
 
 
@@ -455,7 +506,8 @@ def slrp_impute():
         is_script = True)
 
 def execute_impute2(test_hap, ref_hap, ref_legend, recomb_map,
-        output, jobs, chrom, first_last, wd, int_size=5e6):
+        output, jobs, chrom, first_last, wd, int_size=5e6,
+        test_phased=True, ref_phased=True):
     chrom_dict = {}
     with open(first_last, 'r') as fl:
         first_last = fl.readlines()
@@ -464,27 +516,39 @@ def execute_impute2(test_hap, ref_hap, ref_legend, recomb_map,
             chrom_dict[line[0].lstrip('chr')] = line[1]
     pos1 = 1
     last_pos     = int(chrom_dict[chrom])
-    grid_spacing = (last_pos - pos1) / float(int_size)
-    intervals    = np.linspace(pos1 - 1, last_pos, grid_spacing)
+    num_grid = (last_pos - pos1) / float(int_size)
+    num_grid = max(num_grid, 1)
+    intervals    = np.linspace(pos1 - 1, last_pos, num_grid)
+    print(intervals)
     all_jobs, all_iters, all_info = [], [], []
-    #pdb.set_trace()
     for i in range(len(intervals)-1):
         outfile = output + '_iter' + str(i)
-        cmd = '{impute2} -known_haps_g {test_haps} -m {map} -int {start} {end} -h {ref_hap} -l {legend} -o {outfile}'.format(
-            impute2  = options.impute2,
-            test_haps= test_hap,
-            map      = recomb_map,
-            start    = int(intervals[i] + 1),
-            end      = int(intervals[i + 1]),
-            ref_hap  = ref_hap,
-            legend   = ref_legend,
-            outfile  = outfile
-        )
+        if test_phased and ref_phased:
+            cmd = '{impute2} -verbose -known_haps_g {test_haps} -m {map} -int {start} {end} -h {ref_hap} -l {legend} -o {outfile}'.format(
+                impute2  = options.impute2,
+                test_haps= test_hap,
+                map      = recomb_map,
+                start    = int(intervals[i] + 1),
+                end      = int(intervals[i + 1]),
+                ref_hap  = ref_hap,
+                legend   = ref_legend,
+                outfile  = outfile
+            )
+        elif not test_phased and not ref_phased:
+            cmd = """{impute2} -verbose -m {map} -g_ref {g_ref} -g {g_test} -int {start} {end} -Ne 20000 -o {outfile}""".format(
+                    impute2  = options.impute2,
+                    map      = recomb_map,
+                    g_ref    = ref_hap,
+                    g_test   = test_hap,
+                    start     = int(intervals[i] + 1),
+                    end      = int(intervals[i + 1]),
+                    outfile  = outfile
+                    )
         job_id = common.qsub("impute2_{}".format(i),
             "submitting region {}".format(i),
             cmd,
             wait_jobs = jobs,
-            logdir = wd
+            logdir = wd + '../logs/'
         )
         all_jobs.append(job_id)
         all_iters.append(outfile)
@@ -499,7 +563,7 @@ def execute_impute2(test_hap, ref_hap, ref_legend, recomb_map,
             "Combining various impute2 files:\n",
             cmd,
             wait_jobs = all_jobs,
-            logdir = wd
+            logdir = wd + '../logs/'
             )
     # combine info files
     cmd = """tail -n +2 {info} | sed '/^$/d' | grep -v == > {out}.gz.info""".format(
@@ -511,7 +575,7 @@ def execute_impute2(test_hap, ref_hap, ref_legend, recomb_map,
             "Combining various impute2 info files:\n ",
             cmd,
             wait_jobs = all_jobs,
-            logdir = wd
+            logdir = wd + '../logs/'
             )
     return job_id_impute, job_id_info
 

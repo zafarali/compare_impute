@@ -32,30 +32,32 @@ generate_vcf.py
 No flags required by default.
 Please refer to source code for command-line options.
 """
-
+HOME='/sb/project/ams-754-aa/apoursh_projects/imputation/compare_impute'
 DEFAULT_SCRIPT_LOG_LOCATION = analysis.SAMPLED_DATA_BASE + "/logs/generate_vcfs_script.log"
 parser = OptionParser(USAGE)
 parser.add_option('--script_log', default=DEFAULT_SCRIPT_LOG_LOCATION, help='script log file')
 parser.add_option('--vcftools', default='/cvmfs/soft.mugqic/CentOS6/software/vcftools/vcftools-0.1.14/bin/vcftools')
-parser.add_option('--inds_data', default='/home/apoursha/imputation/compare_impute/PopInds')
+parser.add_option('--inds_data', default=HOME + '/PopInds')
 parser.add_option('--java', default='/usr/bin/java')
-parser.add_option('--split_vcf_jar', default='/home/apoursha/imputation/compare_impute/src/lib/splitVCFref.jar')
-parser.add_option('--markers_affy', default='/home/apoursha/imputation/compare_impute/data/affy6_markers.txt')
-parser.add_option('--markers_illumina', default='/home/apoursha/imputation/compare_impute/data/illumina3_markers.txt')
-parser.add_option('--markers_omni', default='/home/apoursha/imputation/compare_impute/data/omni2_5_markers.txt')
-parser.add_option('--markers_exome', default='/home/apoursha/imputation/compare_impute/data/annotatedList.txt')
+parser.add_option('--split_vcf_jar', default=HOME + '/src/lib/splitVCFref.jar')
+parser.add_option('--markers_affy', default=HOME + '/data/affy6_markers.txt')
+parser.add_option('--markers_illumina', default=HOME + '/data/illumina3_markers.txt')
+parser.add_option('--markers_omni', default=HOME + '/data/omni2_5_markers.txt')
+parser.add_option('--markers_exome', default=HOME + '/data/annotatedList.txt')
 #parser.add_option('--markers_affy_exome', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/data/exome_chip/affy/Axiom_bbv09_content.core_50k_YRI.rfmt.txt')
 parser.add_option('--simulated', action='store_true')
+parser.add_option('--dephase', action='store_true')
 
 PANELS = {}
-PANELS['omni2.5', 22] = int(2388927/60)
-PANELS['affy6', 22]   = int(885501/60)
-PANELS['illumina3', 22] = int(308330/60)
+PANELS['omni2.5', 1] = int(2388927/60/25)
+PANELS['affy6', 1]   = int(885501/60/25)
+PANELS['illumina3', 1] = int(308330/60/25)
 
 
 (options,args) = parser.parse_args()
 if options.script_log is None:
     parser.error('no script log file given')
+
 common.initialize_config(options)
 
 # Helper class for loading individuals and sampling them
@@ -116,11 +118,18 @@ class Individuals(object):
         return Reservior(inds)
 
 def gzinput(chrom):
-    return '/home/apoursha/imputation/with_22.vcf.gz'#'/srv/gs1/projects/bustamante/reference_panels/1kG_DATA/integrated/20120317_new_phase1_integrated_genotypes_version_3/orig_files/ALL.chr%d.phase1_release_v3.20101123.snps_indels_svs.genotypes.vcf.gz' % chrom
+    gzname = '/sb/project/ams-754-aa/apoursh_projects/imputation/2mb_22_All'
+    return(gzname + '.dephased.vcf.gz' if options.dephase else gzname + '.vcf.gz')
+    #return gzfiles.using#'/srv/gs1/projects/bustamante/reference_panels/1kG_DATA/integrated/20120317_new_phase1_integrated_genotypes_version_3/orig_files/ALL.chr%d.phase1_release_v3.20101123.snps_indels_svs.genotypes.vcf.gz' % chrom
 
 def process_sample_size_analysis(individuals):
     for item in analysis.SampleSizeAnalysis.ALL:
         for chrom, iteration in item.iterate():
+            if options.dephase:
+                # might want to consider qsubbing this but it doesn't take that much memory
+                # so should be fine to run on head node
+                dephase_vcf(chrom)
+
             job_name_suffix = "samplesize-%04d-%04d-ch%02d-run-%02d" % (item.testsize(), item.refsize(), chrom, iteration)
             sampling = individuals.create_sampling()
             ref_inds = sampling.consume(item.refsize())
@@ -250,6 +259,7 @@ def chunk_vcf(jobname, vcffile, wait_jobs=[], logdir=None, core_size=5000*1000, 
         vmem = 7
         )
 
+
 def create_vcfs(job_name_suffix, item, chrom, iteration, src_vcf, ref_inds, test_inds):
     job_dir = item.dirname(iteration)
     common.mkdirp(job_dir)
@@ -288,6 +298,7 @@ def create_vcfs(job_name_suffix, item, chrom, iteration, src_vcf, ref_inds, test
         "make-test-" + job_name_suffix,
         test_vcf,
         "--gzvcf %s --keep %s --remove-indels" % (src_vcf, test_inds_file))
+
 
     if options.simulated:
         sample_simulated_test_data_vcfs(
@@ -356,7 +367,6 @@ def sample_simulated_test_data_vcfs(job_name_suffix, chrom, ref_vcf, item,
     make_simulated_panel(job_name_suffix,options.markers_omni, ref_vcf,
         make_ref_jid, PANELS['omni2.5', chrom], "omni")
 
-
     create_vcf(
         "make-test-affy-" + job_name_suffix,
         item.vcf_filename(analysis.T_TEST_AFFY, chrom, iteration),
@@ -377,6 +387,41 @@ def sample_simulated_test_data_vcfs(job_name_suffix, chrom, ref_vcf, item,
 
 
 
+
+def dephase_vcf(chrom):
+    from tempfile import mkstemp
+    import shutil
+    import gzip
+    import re
+    from os import fdopen, remove
+    def replacemany(adict, astring):
+        pat = '|'.join(re.escape(s) for s in adict)
+        there = re.compile(pat)
+        def onerepl(mo): return adict[mo.group()]
+        return there.sub(onerepl, astring)
+    opt = options.dephase
+    options.dephase = False
+    vcf_in = gzinput(chrom)
+    options.dephase = opt
+    ext = vcf_in.split(os.extsep)
+    outname = ext[0] + '.dephased.' + '.'.join(ext[1:])
+    if os.path.isfile(outname):
+        return
+    rep = {"0|1": "1/0", "0|0": "0/0", "1|0":"1/0", "1|1":"1/1"}
+    #Produce temp file
+    fh, abs_path = mkstemp()
+    with fdopen(fh,'w') as new_file:
+        with gzip.open(vcf_in, 'rt') as old_file:
+            for line in old_file:
+                if line[0] != '#':
+                    line = replacemany(rep, line)
+                new_file.write(line)
+    #Move temp file to new location
+    print ("Copying dephased vcf over to: {}".format(f_out))
+    with open(abs_path, 'rb') as f_in:
+        with gzip.open(outname, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+    remove(abs_path)
 
 #def sample_simulated_test_data_vcfs(
 #        job_name_suffix, item, chrom, iteration, test_vcf, make_test_jid):
@@ -440,7 +485,7 @@ def down_sample_vcf(jobname, outfile, test_vcf, size, wait_jobs = []):
     return common.qsub_shell_commands(
             jobname, "Create VCF: " + jobname,
             """
-            mkdir %(jobname)s &&
+            mkdir -p %(jobname)s &&
             cd %(jobname)s &&
             zcat %(vcf_file)s | head -20 | grep '#' > %(outfile)s.inprogress &&
             zcat %(vcf_file)s | grep -v '#' | shuf -n %(panel_size)d | sort -g -k2 >> %(outfile)s.inprogress &&

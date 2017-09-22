@@ -5,10 +5,12 @@ author: Gerard Tse (gerardtse@gmail.com)
 This file defines all sets of parameters that are to generate reference and test sets.
 """
 
-DEPTH = 1
-CHROMOSOMES = [22]
+import pdb
 
-SAMPLED_DATA_BASE = "/home/apoursha/imputation/compare_impute"
+DEPTH = 1
+CHROMOSOMES = [1]
+
+SAMPLED_DATA_BASE = "/sb/project/ams-754-aa/apoursh_projects/imputation/compare_impute"
 
 T_REF = "ref"
 T_TEST_TRUTH = "test_truth"
@@ -76,8 +78,8 @@ class SampleSizeAnalysis(Analysis):
 
     ALL = []
 
-SampleSizeAnalysis.ALL = [  #TODO change these
-        SampleSizeAnalysis(5, 5),   # Toy data for testing pipelines
+SampleSizeAnalysis.ALL = [  #TODO change these (test, ref)
+        SampleSizeAnalysis(5, 500),   # Toy data for testing pipelines
         #SampleSizeAnalysis(92, 63),
         #SampleSizeAnalysis(92, 125),
         #SampleSizeAnalysis(92, 250),

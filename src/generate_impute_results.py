@@ -38,7 +38,8 @@ parser.add_option('--dry_run', default='1', help="if set, no jobs are scheduled"
 parser.add_option('--reset', default='0', help="if set, reset job if currently failed.")
 parser.add_option('--reset_running', default='0', help="if set, reset job if currently incomplete, too.")
 parser.add_option('--reset_completed', default='0', help="if set, reset job if currently completed, too.")
-parser.add_option('--phased', action='store_true')
+parser.add_option('--ref-phased', action='store_true')
+parser.add_option('--test-phased', action='store_true')
 
 # Pass through
 parser.add_option('--qsub_use_testq', default='0', help='use the test queue for scheduling')
@@ -207,12 +208,14 @@ def start_pipeline(item, chrom, iteration, step, test_set):
         'qsub_id_file': job_id_file,
         'qsub_use_testq': options.qsub_use_testq,
         'qsub_run_locally': 1}#options.qsub_run_locally } #TODO
-    if options.phased:
+    if options.ref_phased:
         command += """
-        --phased"""
+        --ref-phased"""
+    if options.test_phased:
+        command += """
+        --test-phased"""
     command = re.sub(r'\s+', ' ', command).strip()
     try:
-        pdb.set_trace()
         common.run(item.display_name(), command)
     except Exception as e:
         print("%s: Pipeline command failed. Exiting" % item.display_name())
@@ -265,6 +268,7 @@ def main():
         if 'b' in types:
             process_hold_none_pop_analysis()
         if 'c' in types:
+            # This is the one we are actually using
             process_sample_size_analysis()
         if 'd' in types:
             process_region_biased_analysis()
