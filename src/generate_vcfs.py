@@ -32,9 +32,10 @@ generate_vcf.py
 No flags required by default.
 Please refer to source code for command-line options.
 """
-HOME='/sb/project/ams-754-aa/apoursh_projects/imputation/compare_impute'
+HOME='/sb/project/ams-754-aa/zaf_projects/compare_impute'
 DEFAULT_SCRIPT_LOG_LOCATION = analysis.SAMPLED_DATA_BASE + "/logs/generate_vcfs_script.log"
 parser = OptionParser(USAGE)
+parser.add_option('--vcfname', default='/sb/project/ams-754-aa/zaf_projects/compare_impute/data/ALL.chr20.phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.vcf.gz')
 parser.add_option('--script_log', default=DEFAULT_SCRIPT_LOG_LOCATION, help='script log file')
 parser.add_option('--vcftools', default='/cvmfs/soft.mugqic/CentOS6/software/vcftools/vcftools-0.1.14/bin/vcftools')
 parser.add_option('--inds_data', default=HOME + '/PopInds')
@@ -118,8 +119,9 @@ class Individuals(object):
         return Reservior(inds)
 
 def gzinput(chrom):
-    gzname = '/sb/project/ams-754-aa/apoursh_projects/imputation/2mb_22_All'
-    return(gzname + '.dephased.vcf.gz' if options.dephase else gzname + '.vcf.gz')
+    # gzname = '/sb/project/ams-754-aa/apoursh_projects/imputation/2mb_22_All'
+    # return(gzname + '.dephased.vcf.gz' if options.dephase else gzname + '.vcf.gz')
+    return options.vcfname
     #return gzfiles.using#'/srv/gs1/projects/bustamante/reference_panels/1kG_DATA/integrated/20120317_new_phase1_integrated_genotypes_version_3/orig_files/ALL.chr%d.phase1_release_v3.20101123.snps_indels_svs.genotypes.vcf.gz' % chrom
 
 def process_sample_size_analysis(individuals):
