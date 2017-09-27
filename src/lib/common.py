@@ -40,7 +40,7 @@ def initialize_config(options):
     if hasattr(options, 'qsub_use_testq'):
         CONFIG.QSUB_USE_TESTQ = int(options.qsub_use_testq)
     #if hasattr(options, 'qsub_run_locally'):
-    CONFIG.QSUB_RUN_LOCALLY = 1#int(options.qsub_run_locally) #TODO change this for large analysis
+    CONFIG.QSUB_RUN_LOCALLY = int(options.qsub_run_locally)
 
 # Helper function to record commands, handle return values and print to log file
 def run(info, cmd):

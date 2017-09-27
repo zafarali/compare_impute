@@ -10,7 +10,7 @@ import pdb
 DEPTH = 1
 CHROMOSOMES = [1]
 
-SAMPLED_DATA_BASE = "/sb/project/ams-754-aa/apoursh_projects/imputation/compare_impute"
+SAMPLED_DATA_BASE = "/sb/project/ams-754-aa/zaf_projects/compare_impute"
 
 T_REF = "ref"
 T_TEST_TRUTH = "test_truth"

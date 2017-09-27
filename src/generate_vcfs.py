@@ -48,7 +48,7 @@ parser.add_option('--markers_exome', default=HOME + '/data/annotatedList.txt')
 #parser.add_option('--markers_affy_exome', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/data/exome_chip/affy/Axiom_bbv09_content.core_50k_YRI.rfmt.txt')
 parser.add_option('--simulated', action='store_true')
 parser.add_option('--dephase', action='store_true')
-
+parser.add_option('--qsub_run_locally', default=False, action='store_true')
 PANELS = {}
 PANELS['omni2.5', 1] = int(2388927/60/25)
 PANELS['affy6', 1]   = int(885501/60/25)
