@@ -14,33 +14,50 @@ import re
 import stat
 import sys
 import tempfile
-
+import pdb
+from numpy.random import choice
+import numpy as np
+import pandas as pd
 # Our own libraries
 from lib import analysis
 from lib import common
+_EPS=2e-4
+LD_SUBSAMPLER=3
+LD_SUBSAMPLER=3
+
+
 
 USAGE = """
 generate_vcf.py
 No flags required by default.
 Please refer to source code for command-line options.
 """
-
-DEFAULT_SCRIPT_LOG_LOCATION = analysis.SAMPLED_DATA_BASE + "/generate_vcfs_script.log"
+HOME='/sb/project/ams-754-aa/apoursh_projects/imputation/compare_impute'
+DEFAULT_SCRIPT_LOG_LOCATION = analysis.SAMPLED_DATA_BASE + "/logs/generate_vcfs_script.log"
 parser = OptionParser(USAGE)
 parser.add_option('--script_log', default=DEFAULT_SCRIPT_LOG_LOCATION, help='script log file')
-parser.add_option('--vcftools', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/tools/bin/vcftools')
-parser.add_option('--inds_data', default='/srv/gs1/projects/bustamante/reference_panels/1kG_DATA/integrated/20120317_new_phase1_integrated_genotypes_version_3/PopInds')
-parser.add_option('--java', default='/srv/gs1/projects/bustamante/scg3_inhousebin/java')
-parser.add_option('--split_vcf_jar', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/tools/bin/splitVCFref.jar')
-parser.add_option('--markers_affy', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/data/affy6_markers.txt')
-parser.add_option('--markers_illumina', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/data/illumina3_markers.txt')
-parser.add_option('--markers_omni', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/data/omni2_5_markers.txt')
-parser.add_option('--markers_exome', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/data/exome_chip/annotatedList.txt')
-parser.add_option('--markers_affy_exome', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/data/exome_chip/affy/Axiom_bbv09_content.core_50k_YRI.rfmt.txt')
+parser.add_option('--vcftools', default='/cvmfs/soft.mugqic/CentOS6/software/vcftools/vcftools-0.1.14/bin/vcftools')
+parser.add_option('--inds_data', default=HOME + '/PopInds')
+parser.add_option('--java', default='/usr/bin/java')
+parser.add_option('--split_vcf_jar', default=HOME + '/src/lib/splitVCFref.jar')
+parser.add_option('--markers_affy', default=HOME + '/data/affy6_markers.txt')
+parser.add_option('--markers_illumina', default=HOME + '/data/illumina3_markers.txt')
+parser.add_option('--markers_omni', default=HOME + '/data/omni2_5_markers.txt')
+parser.add_option('--markers_exome', default=HOME + '/data/annotatedList.txt')
+#parser.add_option('--markers_affy_exome', default='/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/data/exome_chip/affy/Axiom_bbv09_content.core_50k_YRI.rfmt.txt')
+parser.add_option('--simulated', action='store_true')
+parser.add_option('--dephase', action='store_true')
+
+PANELS = {}
+PANELS['omni2.5', 1] = int(2388927/60/25)
+PANELS['affy6', 1]   = int(885501/60/25)
+PANELS['illumina3', 1] = int(308330/60/25)
+
 
 (options,args) = parser.parse_args()
 if options.script_log is None:
     parser.error('no script log file given')
+
 common.initialize_config(options)
 
 # Helper class for loading individuals and sampling them
@@ -64,7 +81,7 @@ class Individuals(object):
     def __init__(self):
         self.load()
 
-    def load(self):
+    def load(self): #TODO fix this. This puts individuals in a samples dictionary based on their ances. and creates an array of all individuals
         filenames = os.listdir(options.inds_data)
         samples = {}
         all_inds = []
@@ -74,7 +91,7 @@ class Individuals(object):
             inds = [line.strip() for line in f]
             samples[pop] = inds
             all_inds += inds
-            
+
         self.samples = samples
         self.pops = samples.keys()
         self.all_inds = all_inds
@@ -101,9 +118,24 @@ class Individuals(object):
         return Reservior(inds)
 
 def gzinput(chrom):
-    return '/srv/gs1/projects/bustamante/reference_panels/1kG_DATA/integrated/20120317_new_phase1_integrated_genotypes_version_3/orig_files/ALL.chr%d.phase1_release_v3.20101123.snps_indels_svs.genotypes.vcf.gz' % chrom
+    gzname = '/sb/project/ams-754-aa/apoursh_projects/imputation/2mb_22_All'
+    return(gzname + '.dephased.vcf.gz' if options.dephase else gzname + '.vcf.gz')
+    #return gzfiles.using#'/srv/gs1/projects/bustamante/reference_panels/1kG_DATA/integrated/20120317_new_phase1_integrated_genotypes_version_3/orig_files/ALL.chr%d.phase1_release_v3.20101123.snps_indels_svs.genotypes.vcf.gz' % chrom
 
 def process_sample_size_analysis(individuals):
+    for item in analysis.SampleSizeAnalysis.ALL:
+        for chrom, iteration in item.iterate():
+            if options.dephase:
+                # might want to consider qsubbing this but it doesn't take that much memory
+                # so should be fine to run on head node
+                dephase_vcf(chrom)
+
+            job_name_suffix = "samplesize-%04d-%04d-ch%02d-run-%02d" % (item.testsize(), item.refsize(), chrom, iteration)
+            sampling = individuals.create_sampling()
+            ref_inds = sampling.consume(item.refsize())
+            test_inds = sampling.consume(item.testsize())
+            create_vcfs(job_name_suffix, item, chrom, iteration, gzinput(chrom), ref_inds, test_inds)
+def simulated_sample_size_analysis(individuals):
     for item in analysis.SampleSizeAnalysis.ALL:
         for chrom, iteration in item.iterate():
             job_name_suffix = "samplesize-%04d-%04d-ch%02d-run-%02d" % (item.testsize(), item.refsize(), chrom, iteration)
@@ -112,7 +144,11 @@ def process_sample_size_analysis(individuals):
             test_inds = sampling.consume(item.testsize())
             create_vcfs(job_name_suffix, item, chrom, iteration, gzinput(chrom), ref_inds, test_inds)
 
-def process_population_analysis(individuals):
+
+
+def process_population_analysis(individuals):  #TODO this is unchecked and should not be used
+    print("process_population_analysi has not been checked. therefore I'm stopping this")
+    assert False
     for item in analysis.HoldOnePopAnalysis.ALL:
         for chrom, iteration in item.iterate():
             job_name_suffix = "pop-excluded-%s-ch%02d-run-%02d" % (item.pop(), chrom, iteration)
@@ -160,7 +196,7 @@ def create_inds_file(filename, samples):
 def create_vcf(jobname, outfile, vcftools_args, wait_jobs = []):
     if os.path.exists(outfile):
         # No need to recreate
-        print "Output already exists, skipping: %s" % jobname
+        print("Output already exists, skipping: {}".format(jobname))
         return None
     # Make a log dir if it doesn't exists
     logdir = os.path.join(os.path.dirname(outfile), 'logs')
@@ -170,8 +206,7 @@ def create_vcf(jobname, outfile, vcftools_args, wait_jobs = []):
         """
         mkdir %(jobname)s &&
         cd %(jobname)s &&
-        %(vcftools)s %(vcftools_args)s --recode-to-stream | gzip -c - > %(outfile)s.inprogress &&
-        cat out.log &&
+        %(vcftools)s %(vcftools_args)s --recode --stdout | gzip -c - > %(outfile)s.inprogress &&
         cd .. &&
         mv %(outfile)s.inprogress %(outfile)s &&
         rm -Rf %(jobname)s
@@ -188,9 +223,9 @@ def create_vcf(jobname, outfile, vcftools_args, wait_jobs = []):
 def chunk_vcf(jobname, vcffile, wait_jobs=[], logdir=None, core_size=5000*1000, flanking_size=250*1000):
     if os.path.exists(vcffile + ".splitlog.csv"):
         # No need to recreate
-        print "Output already exists, skipping: %s" % jobname
+        print("Output already exists, skipping: %s" % jobname)
         return None
-    
+
     logdir = os.path.join(os.path.dirname(vcffile), 'logs')
     cmd = """
       #
@@ -199,10 +234,12 @@ def chunk_vcf(jobname, vcffile, wait_jobs=[], logdir=None, core_size=5000*1000, 
       # Then calculate the range size and divide by desired chunk size for number of chunks
       # Use the ceil of that to recalculate actual chunk size with that many chunks
       #
-      MIN_AND_MAX=$(zcat %(vcf)s | grep -v -E "^#" | awk '{print $2}' | sort |  awk 'NR==1; END{print}')  &&
+      MIN_AND_MAX=$(zcat %(vcf)s | grep -v -E "^#" | awk '{print $2}' | sort -g |  awk 'NR==1; END{print}')  &&
       MAX=$(echo "$MIN_AND_MAX" | tail -n 1)  &&
       MIN=$(echo "$MIN_AND_MAX" | head -n 1)  &&
-      CHUNKSIZE=$(python -c "from math import ceil; range=$MAX-$MIN; chunks=ceil(range/float(%(core_size)s)); print int(ceil(range / chunks))") &&
+      echo $MAX &&
+      echo $MIN &&
+      CHUNKSIZE=$(python -c "from math import ceil; range=$MAX-$MIN; chunks=ceil(range/float(%(core_size)s)); print(int(ceil(range / chunks)))") &&
       echo "Using min:$MIN max:$MAX desired_chunk_size:%(core_size)s actual_chunk_size:$CHUNKSIZE" &&
       # To work around a bug in base-pair count parsing in the jar, add period (It normally expects Kb Mb)
       %(java)s -Xmx4g -jar %(split_vcf_jar)s --vcfref %(vcf)s --coresize ${CHUNKSIZE}.b --flankingsize %(flanking_size)s.b
@@ -222,6 +259,7 @@ def chunk_vcf(jobname, vcffile, wait_jobs=[], logdir=None, core_size=5000*1000, 
         vmem = 7
         )
 
+
 def create_vcfs(job_name_suffix, item, chrom, iteration, src_vcf, ref_inds, test_inds):
     job_dir = item.dirname(iteration)
     common.mkdirp(job_dir)
@@ -229,17 +267,17 @@ def create_vcfs(job_name_suffix, item, chrom, iteration, src_vcf, ref_inds, test
     f = open(os.path.join(job_dir, "job_name.cfg"), 'w')
     f.write(job_name_suffix)
     f.close()
-    
+
     ref_vcf = item.vcf_filename(analysis.T_REF, chrom, iteration)
     test_vcf = item.vcf_filename(analysis.T_TEST_TRUTH, chrom, iteration)
-    
+
     state = os.path.exists(ref_vcf) + os.path.exists(test_vcf)
     if state == 1:
         if os.path.exists(ref_vcf):
             os.remove(ref_vcf)
         if os.path.exists(test_vcf):
             os.remove(test_vcf)
-    
+
     ref_inds_file = None
     test_inds_file = None
     if state != 2:
@@ -247,12 +285,11 @@ def create_vcfs(job_name_suffix, item, chrom, iteration, src_vcf, ref_inds, test
         test_inds_file = item.inds_filename(analysis.T_TEST_TRUTH)
         create_inds_file(ref_inds_file, ref_inds)
         create_inds_file(test_inds_file, test_inds)
-    
     make_ref_jid = create_vcf(
         "make-ref-" + job_name_suffix,
         item.vcf_filename(analysis.T_REF, chrom, iteration),
         "--gzvcf %s --keep %s --remove-indels" % (src_vcf, ref_inds_file))
-    
+
     chunk_vcf(
         "chunk-ref-" + job_name_suffix,
         item.vcf_filename(analysis.T_REF, chrom, iteration),
@@ -261,41 +298,218 @@ def create_vcfs(job_name_suffix, item, chrom, iteration, src_vcf, ref_inds, test
         "make-test-" + job_name_suffix,
         test_vcf,
         "--gzvcf %s --keep %s --remove-indels" % (src_vcf, test_inds_file))
-    
+
+
+    if options.simulated:
+        sample_simulated_test_data_vcfs(
+                job_name_suffix, chrom, ref_vcf, item, iteration, test_vcf,
+                make_ref_jid, make_test_jid)
+    else:
+        sample_real_test_data_vcfs(
+                job_name_suffix, item, chrom, iteration, test_vcf, make_test_jid)
+
+def make_simulated_panel(job_name_suffix, panel, ref_vcf, wait_jobs, size, panel_name):
+    panel_directory = os.path.dirname(panel)
+    panel_file_name = os.path.basename(panel)
+    outfile = panel_directory + "/simulated_" + panel_file_name
+    setattr(options, "markers_" + panel_name, outfile)
+    if os.path.exists(outfile):
+        print("Output already exists, skipping: make-fake-{}-{}".format(panel_name, job_name_suffix))
+        return
+    # check if allele frequencies exist, if not regenerate them
+    vcf_file_name = os.path.basename(ref_vcf)
+    af_file_name = panel_directory + "/" + vcf_file_name + ".frq"
+    logdir = os.path.join(panel_directory, 'logs')
+    common.mkdirp(logdir)
+    allele_freq_jid = None
+    if not os.path.exists(af_file_name):
+        jobname = 'Frequency' + job_name_suffix
+        allele_freq_jid = common.qsub_shell_commands(
+        jobname, "Create allele frequency file: " + jobname,
+        """
+        %(vcftools)s --gzvcf %(infile)s --freq2 --out %(outfile)s
+        """ % {
+            'jobname' : job_name_suffix,
+            'vcftools' : options.vcftools,
+            'infile' : ref_vcf,
+            'outfile' : panel_directory + "/" + vcf_file_name # vcftools adds a .frq
+        },
+        wait_jobs = wait_jobs,
+        logdir = logdir,
+        sync = True
+        )
+        # wait for jobs to finish.
+    freq = pd.read_table(filepath_or_buffer=af_file_name, sep='\t', header=0)
+    chrom = np.array(freq.index)
+    pos = np.array(freq.CHROM)
+    freq = np.array(freq['{FREQ}'])
+    freq[freq > 0.5] = 1.0 - freq[freq > 0.5] # get minor allele frequency
+    #freq[freq == 0]  = _EPS
+    freq = freq / np.sum(freq)
+    locations = np.random.choice(range(freq.shape[0]), size=LD_SUBSAMPLER * size, replace=False, p = freq)
+    locations = locations[0::LD_SUBSAMPLER]
+    locations = np.sort(locations)
+    del freq
+    with open(outfile, 'w') as fp:
+        for location in locations:
+            fp.write("""%(ch)s:%(pos)s\n""" % {
+                'ch' : chrom[location],
+                'pos' : pos[location]})
+        fp.close()
+
+def sample_simulated_test_data_vcfs(job_name_suffix, chrom, ref_vcf, item,
+        iteration, test_vcf, make_ref_jid, make_test_jid):
+    #TODO actually make this work with multiple chroms
+    make_simulated_panel(job_name_suffix,options.markers_affy, ref_vcf,
+        make_ref_jid, PANELS['affy6', chrom], 'affy')
+    make_simulated_panel(job_name_suffix,options.markers_illumina, ref_vcf,
+        make_ref_jid, PANELS['illumina3', chrom], "illumina")
+    make_simulated_panel(job_name_suffix,options.markers_omni, ref_vcf,
+        make_ref_jid, PANELS['omni2.5', chrom], "omni")
+
     create_vcf(
         "make-test-affy-" + job_name_suffix,
         item.vcf_filename(analysis.T_TEST_AFFY, chrom, iteration),
         "--gzvcf %s --snps %s" % (test_vcf, options.markers_affy),
         wait_jobs = [make_test_jid])
-    
+
     create_vcf(
         "make-test-illumina-" + job_name_suffix,
         item.vcf_filename(analysis.T_TEST_ILLUMINA, chrom, iteration),
         "--gzvcf %s --snps %s" % (test_vcf, options.markers_illumina),
         wait_jobs = [make_test_jid])
-    
+
     create_vcf(
         "make-test-omni-" + job_name_suffix,
         item.vcf_filename(analysis.T_TEST_OMNI, chrom, iteration),
         "--gzvcf %s --snps %s" % (test_vcf, options.markers_omni),
         wait_jobs = [make_test_jid])
-    
+
+
+
+
+def dephase_vcf(chrom):
+    from tempfile import mkstemp
+    import shutil
+    import gzip
+    import re
+    from os import fdopen, remove
+    def replacemany(adict, astring):
+        pat = '|'.join(re.escape(s) for s in adict)
+        there = re.compile(pat)
+        def onerepl(mo): return adict[mo.group()]
+        return there.sub(onerepl, astring)
+    opt = options.dephase
+    options.dephase = False
+    vcf_in = gzinput(chrom)
+    options.dephase = opt
+    ext = vcf_in.split(os.extsep)
+    outname = ext[0] + '.dephased.' + '.'.join(ext[1:])
+    if os.path.isfile(outname):
+        return
+    rep = {"0|1": "1/0", "0|0": "0/0", "1|0":"1/0", "1|1":"1/1"}
+    #Produce temp file
+    fh, abs_path = mkstemp()
+    with fdopen(fh,'w') as new_file:
+        with gzip.open(vcf_in, 'rt') as old_file:
+            for line in old_file:
+                if line[0] != '#':
+                    line = replacemany(rep, line)
+                new_file.write(line)
+    #Move temp file to new location
+    print ("Copying dephased vcf over to: {}".format(f_out))
+    with open(abs_path, 'rb') as f_in:
+        with gzip.open(outname, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+    remove(abs_path)
+
+#def sample_simulated_test_data_vcfs(
+#        job_name_suffix, item, chrom, iteration, test_vcf, make_test_jid):
+#    down_sample_vcf(
+#            "make-fake-affy-" + job_name_suffix, item.vcf_filename(
+#                analysis.T_TEST_AFFY, chrom, iteration),
+#            test_vcf, PANELS['affy6', chrom], wait_jobs = [make_test_jid])
+#
+#    down_sample_vcf(
+#            "make-fake-illumina-" + job_name_suffix, item.vcf_filename(
+#                analysis.T_TEST_ILLUMINA, chrom, iteration),
+#            test_vcf, PANELS['illumina3', chrom], wait_jobs = [make_test_jid])
+#
+#    down_sample_vcf(
+#            "make-fake-omni" + job_name_suffix, item.vcf_filename(
+#                analysis.T_TEST_OMNI, chrom, iteration),
+#            test_vcf, PANELS['omni2.5', chrom], wait_jobs = [make_test_jid])
+#
+
+def sample_real_test_data_vcfs(
+        job_name_suffix, item, chrom, iteration, test_vcf, make_test_jid):
+    create_vcf(
+        "make-test-affy-" + job_name_suffix,
+        item.vcf_filename(analysis.T_TEST_AFFY, chrom, iteration),
+        "--gzvcf %s --snps %s" % (test_vcf, options.markers_affy),
+        wait_jobs = [make_test_jid])
+
+    create_vcf(
+        "make-test-illumina-" + job_name_suffix,
+        item.vcf_filename(analysis.T_TEST_ILLUMINA, chrom, iteration),
+        "--gzvcf %s --snps %s" % (test_vcf, options.markers_illumina),
+        wait_jobs = [make_test_jid])
+
+    create_vcf(
+        "make-test-omni-" + job_name_suffix,
+        item.vcf_filename(analysis.T_TEST_OMNI, chrom, iteration),
+        "--gzvcf %s --snps %s" % (test_vcf, options.markers_omni),
+        wait_jobs = [make_test_jid])
+
     create_vcf(
         "make-test-exome-" + job_name_suffix,
         item.vcf_filename(analysis.T_TEST_EXOME, chrom, iteration),
         "--gzvcf %s --positions %s" % (test_vcf, options.markers_exome),
         wait_jobs = [make_test_jid])
-    
+
     create_vcf(
         "make-test-affy-exome-" + job_name_suffix,
         item.vcf_filename(analysis.T_TEST_AFFY_EXOME, chrom, iteration),
         "--gzvcf %s --positions %s" % (test_vcf, options.markers_affy_exome),
         wait_jobs = [make_test_jid])
 
+def down_sample_vcf(jobname, outfile, test_vcf, size, wait_jobs = []):
+    if os.path.exists(outfile):
+        # No need to recreate
+        print("Output already exists, skipping: {}".format(jobname))
+        return None
+    # Make a log dir if it doesn't exists
+    logdir = os.path.join(os.path.dirname(outfile), 'logs')
+    common.mkdirp(logdir)
+    print(size)
+    return common.qsub_shell_commands(
+            jobname, "Create VCF: " + jobname,
+            """
+            mkdir -p %(jobname)s &&
+            cd %(jobname)s &&
+            zcat %(vcf_file)s | head -20 | grep '#' > %(outfile)s.inprogress &&
+            zcat %(vcf_file)s | grep -v '#' | shuf -n %(panel_size)d | sort -g -k2 >> %(outfile)s.inprogress &&
+            gzip %(outfile)s.inprogress
+            cd .. &&
+            mv %(outfile)s.inprogress.gz %(outfile)s &&
+            rm -Rf %(jobname)s
+            """ % {
+            'jobname' : jobname,
+            'vcf_file' : test_vcf,
+            'panel_size' : int(size),
+            'outfile' : outfile
+        },
+        wait_jobs = wait_jobs,
+        logdir = logdir
+        )
+
+
+
+
 def main():
     individuals = Individuals()
     process_sample_size_analysis(individuals)
-    process_population_analysis(individuals)
+    #process_population_analysis(individuals)
 
 if __name__ == "__main__":
     main()

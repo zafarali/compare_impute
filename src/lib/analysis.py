@@ -5,10 +5,12 @@ author: Gerard Tse (gerardtse@gmail.com)
 This file defines all sets of parameters that are to generate reference and test sets.
 """
 
-DEPTH = 1
-CHROMOSOMES = [22]
+import pdb
 
-SAMPLED_DATA_BASE = '/srv/gs1/projects/bustamante/armartin_projects/rare_imputation/workspace'
+DEPTH = 1
+CHROMOSOMES = [1]
+
+SAMPLED_DATA_BASE = "/sb/project/ams-754-aa/apoursh_projects/imputation/compare_impute"
 
 T_REF = "ref"
 T_TEST_TRUTH = "test_truth"
@@ -19,7 +21,7 @@ T_TEST_EXOME = "test_exome"
 T_TEST_AFFY_EXOME = "test_affy_exome" #am
 
 class Analysis(object):
-    
+
     ALL = []
     DATASET = [
         T_REF,
@@ -28,7 +30,7 @@ class Analysis(object):
         T_TEST_ILLUMINA,
         T_TEST_OMNI,
         T_TEST_EXOME,
-        T_TEST_AFFY_EXOME #am
+        #T_TEST_AFFY_EXOME #am
         ]
 
     def display_name(self):
@@ -57,7 +59,7 @@ class Analysis(object):
 
     def iterate(self):
         for chrom in CHROMOSOMES:
-            for iteration in xrange(DEPTH):
+            for iteration in range(DEPTH):
                 yield (chrom, iteration + 1)
 
 class SampleSizeAnalysis(Analysis):
@@ -76,21 +78,21 @@ class SampleSizeAnalysis(Analysis):
 
     ALL = []
 
-SampleSizeAnalysis.ALL = [
-        SampleSizeAnalysis(5, 5),   # Toy data for testing pipelines
-        SampleSizeAnalysis(92, 63),
-        SampleSizeAnalysis(92, 125),
-        SampleSizeAnalysis(92, 250),
-        SampleSizeAnalysis(92, 500),
-        SampleSizeAnalysis(92, 1000),
-        SampleSizeAnalysis(300, 62),
-        SampleSizeAnalysis(300, 125),
-        SampleSizeAnalysis(300, 250),
-        SampleSizeAnalysis(300, 500),
-        SampleSizeAnalysis(500, 62),
-        SampleSizeAnalysis(500, 125),
-        SampleSizeAnalysis(500, 250),
-        SampleSizeAnalysis(500, 500),
+SampleSizeAnalysis.ALL = [  #TODO change these (test, ref)
+        SampleSizeAnalysis(5, 500),   # Toy data for testing pipelines
+        #SampleSizeAnalysis(92, 63),
+        #SampleSizeAnalysis(92, 125),
+        #SampleSizeAnalysis(92, 250),
+        #SampleSizeAnalysis(92, 500),
+        #SampleSizeAnalysis(92, 1000),
+        #SampleSizeAnalysis(300, 62),
+        #SampleSizeAnalysis(300, 125),
+        #SampleSizeAnalysis(300, 250),
+        #SampleSizeAnalysis(300, 500),
+        #SampleSizeAnalysis(500, 62),
+        #SampleSizeAnalysis(500, 125),
+        #SampleSizeAnalysis(500, 250),
+        #SampleSizeAnalysis(500, 500),
     ]
 
 _AF = 'Africa'
