@@ -451,23 +451,23 @@ def sample_real_test_data_vcfs(
         "--gzvcf %s --snps %s" % (test_vcf, options.markers_affy),
         wait_jobs = [make_test_jid])
 
-    create_vcf(
-        "make-test-illumina-" + job_name_suffix,
-        item.vcf_filename(analysis.T_TEST_ILLUMINA, chrom, iteration),
-        "--gzvcf %s --snps %s" % (test_vcf, options.markers_illumina),
-        wait_jobs = [make_test_jid])
+    # create_vcf(
+    #     "make-test-illumina-" + job_name_suffix,
+    #     item.vcf_filename(analysis.T_TEST_ILLUMINA, chrom, iteration),
+    #     "--gzvcf %s --snps %s" % (test_vcf, options.markers_illumina),
+    #     wait_jobs = [make_test_jid])
 
-    create_vcf(
-        "make-test-omni-" + job_name_suffix,
-        item.vcf_filename(analysis.T_TEST_OMNI, chrom, iteration),
-        "--gzvcf %s --snps %s" % (test_vcf, options.markers_omni),
-        wait_jobs = [make_test_jid])
+    # create_vcf(
+    #     "make-test-omni-" + job_name_suffix,
+    #     item.vcf_filename(analysis.T_TEST_OMNI, chrom, iteration),
+    #     "--gzvcf %s --snps %s" % (test_vcf, options.markers_omni),
+    #     wait_jobs = [make_test_jid])
 
-    create_vcf(
-        "make-test-exome-" + job_name_suffix,
-        item.vcf_filename(analysis.T_TEST_EXOME, chrom, iteration),
-        "--gzvcf %s --positions %s" % (test_vcf, options.markers_exome),
-        wait_jobs = [make_test_jid])
+    # create_vcf(
+    #     "make-test-exome-" + job_name_suffix,
+    #     item.vcf_filename(analysis.T_TEST_EXOME, chrom, iteration),
+    #     "--gzvcf %s --positions %s" % (test_vcf, options.markers_exome),
+    #     wait_jobs = [make_test_jid])
 
     create_vcf(
         "make-test-affy-exome-" + job_name_suffix,
