@@ -58,7 +58,7 @@ def create_vcf(vcf, arguments, outname, options):
 
 def split_vcfs(vcf, options, coresize=5000000):
 	splitter="""
-	bash {home}/splitter.sh {vcf}"""
+	bash {home}/splitter.sh {vcf} {split_vcf_jar}"""
 	return splitter
 
 def simulate_affy_panels(options):
@@ -77,16 +77,16 @@ TEMPLATE = """#!/bin/bash
 """
 if __name__ == '__main__':
 	(options,args) = parser.parse_args()
-
-
+	options.vcf_og = options.vcf # store this as the global truth
 	qsub_script = TEMPLATE
 
 	create_folder(options.outfolder)
 	create_individuals_files(options)
 
 	if options.dephase:
-		qsub_script += '{home}/src/dephase.py --vcf {vcf} --out {outfolder}'
-		options.vcf = os.path.join(options.outfolder, '*.dephased.*')
+		qsub_script += '{home}/src/dephase.py --vcf {vcf_og} --out {outfolder}'
+		ext = options.vcf.split(os.extsep)
+		options.vcf = os.path.join(options.outfolder, ext[0] + '.dephased.' + '.'.join(ext[1:]))
 	qsub_script += create_vcf(options.vcf,
 							  '--keep {outfolder}/ref.inds --remove-indels',
 							  '{outfolder}/ref.vcf.gz',
@@ -107,12 +107,13 @@ if __name__ == '__main__':
 	qsub_script += split_vcfs('{outfolder}/ref.vcf.gz', options)
 
 
-	print(qsub_script)
 	print(qsub_script.format(
 				home=HOME,
 				outfolder=options.outfolder,
 				markers=options.markers,
 				vcf=options.vcf,
+				vcftools=options.vcftools,
 				nodes=options.nodes,
-				queue=options.queue))
-	# print(HOME)
+				queue=options.queue,
+				split_vcf_jar=options.split_vcf_jar,
+				vcf_og=options.vcf_og))
