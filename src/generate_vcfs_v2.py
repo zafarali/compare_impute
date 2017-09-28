@@ -24,10 +24,10 @@ parser.add_option('--nodes', default=16)
 class Sampler(object):
 	def __init__(self, vcf):
 		individual_ids = np.genfromtxt(vcf, dtype=str, max_rows=1, comments='##').tolist()
-		self.all_inds = individual_ids
+		self.all_inds = individual_ids[9:]
 	def train_test_split(self, train_count):
 		train_count = min(train_count,len(self.all_inds))
-		random.shuffle(self.all_inds, len(self.all_inds))
+		random.shuffle(self.all_inds)
 		return self.all_inds[:train_count], self.all_inds[train_count:]
 
 def write_individuals_file(filename, individuals):
@@ -47,45 +47,34 @@ def create_individuals_files(options):
 def main():
 	pass
 
-def create_vcf(vcf, arguments, outname):
+def create_vcf(vcf, arguments, outname, options):
 	template="""
 	{vcftools} --gzvcf {vcf} {vcftools_args} --recode --stdout | gzip -c - > {outname}.inprogress
 	mv {outname}.inprogress {outname}"""
 	return template.format(vcftools_args=arguments,
-		outname=outname)
+						   outname=outname,
+						   vcf=options.vcf,
+						   vcftools=options.vcftools)
 
-def split_vcfs(vcf, coresize=5000000):
+def split_vcfs(vcf, options, coresize=5000000):
 	splitter="""
-	MIN_AND_MAX=$(zcat {vcf} | grep -v -E "^#" | awk '{print $2}' | sort |  awk 'NR==1; END{print}')
-	MAX=$(echo "$MIN_AND_MAX" | tail -n 1)
-	MIN=$(echo "$MIN_AND_MAX" | head -n 1)
-
-	echo "Using min:$MIN and max:$MAX"
-
-	# Calculates the actual size of a chunk in each VCF
-	CORESIZE={coresize} # 5Mb region
-	CHUNKSIZE=$(python -c "from math import ceil; range=${MAX}-${MIN}; chunks=ceil(range/float({coresize})); print(int(ceil(range / chunks)))") &&
-
-
-	SPLITTER="{split_vcf_loc}"
-
-	java -Xmx4g -jar $SPLITTER --vcfref {vcf} --coresize $CHUNKSIZE.b"""
-
-	return splitter.format(coresize=coresize, vcf=vcf)
+	bash {home}/splitter.sh {vcf}"""
+	return splitter
 
 def simulate_affy_panels(options):
 	cmd = """
-	python3.5 ./src/simulate_affy_panels.py --vcf {vcf} --out {outfolder} --vcftools {vcftools}"""
+	python3.5 {home}/src/simulate_affy_panels.py --vcf {vcf} --out {outfolder} --vcftools {vcftools}"""
 	return cmd
 
 TEMPLATE = """#!/bin/bash
 #PBS -l nodes=1:ppn={nodes}
 #PBS -l walltime=10:00:00
 #PBS -A ams-754-aa
-#PBS -N pipeline-{vcffile}
+#PBS -N pipeline-{vcf}
 #PBS -o {outfolder}/out.txt
 #PBS -e {outfolder}/error.txt
-#PBS -q {queue}"""
+#PBS -q {queue}
+"""
 if __name__ == '__main__':
 	(options,args) = parser.parse_args()
 
@@ -96,19 +85,34 @@ if __name__ == '__main__':
 	create_individuals_files(options)
 
 	if options.dephase:
-		qsub_script += '\n ./src/dephase.py --vcf {vcffile} --out {outfolder}'
-
-	options.vcf = glob.glob(os.path.join(options.outfolder, '*.dephased.*'))[0]
-	qsub_script += create_vcf(options.vcf, '--keep {outfolder}/ref.inds --remove-indels', '{outfolder}/ref.vcf.gz')
-	qsub_script += create_vcf(options.vcf, '--keep {outfolder}/test.inds --remove-indels', '{outfolder}/study_ground_truth.vcf.gz')
+		qsub_script += '{home}/src/dephase.py --vcf {vcf} --out {outfolder}'
+		options.vcf = os.path.join(options.outfolder, '*.dephased.*')
+	qsub_script += create_vcf(options.vcf,
+							  '--keep {outfolder}/ref.inds --remove-indels',
+							  '{outfolder}/ref.vcf.gz',
+							  options)
+	qsub_script += create_vcf(options.vcf,
+							  '--keep {outfolder}/test.inds --remove-indels',
+							  '{outfolder}/study_ground_truth.vcf.gz',
+							  options)
 
 	if options.simulated:
 		qsub_script += simulate_affy_panels(options)
 		options.markers = os.path.join(options.outfolder, 'panelaffy', 'simulated_affy.txt')
 
-	qsub_script += create_vcf('{outfolder}/study_ground_truth.vcf.gz', '--snps {markers} --remove-indels', '{outfolder}/study.vcf.gz')
-	qsub_script += split_vcfs('{outfolder}/ref.vcf.gz')
+	qsub_script += create_vcf('{outfolder}/study_ground_truth.vcf.gz',
+							  '--snps {markers} --remove-indels',
+							  '{outfolder}/study.vcf.gz',
+							  options)
+	qsub_script += split_vcfs('{outfolder}/ref.vcf.gz', options)
 
 
 	print(qsub_script)
-	print(HOME)
+	print(qsub_script.format(
+				home=HOME,
+				outfolder=options.outfolder,
+				markers=options.markers,
+				vcf=options.vcf,
+				nodes=options.nodes,
+				queue=options.queue))
+	# print(HOME)
