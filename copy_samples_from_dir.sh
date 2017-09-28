@@ -7,7 +7,7 @@
 #PBS -o msprime-pipe-prep.out
 #PBS -e msprime-pipe-prep.err
 
-source_folder="/sb/project/ams-754-aa/zaf_projects/deep/data/"
+source_folder="/sb/project/ams-754-aa/zaf_projects/deep/imputation/"
 target_folder="/sb/project/ams-754-aa/zaf_projects/compare_impute/data/"
 
 touch ${source_folder}msprime-gz.inprogress
