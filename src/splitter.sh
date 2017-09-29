@@ -1,13 +1,13 @@
 vcf=${1}
 SPLITTER=${2}
 
-if [ $vcf -eq '']
+if [ $vcf -eq ""]
 then
-    echo 'Please give vcf as first argument.'
+    echo "Please give vcf as first argument."
     exit
 fi
 
-if [ $SPLITTER -eq '']
+if [ $SPLITTER -eq ""]
 then
     SPLITTER="/sb/project/ams-754-aa/zaf_projects/imputation/data/splitVCFref.jar"
 fi
