@@ -68,7 +68,7 @@ def simulate_affy_panels(options):
 
 TEMPLATE = """#!/bin/bash
 #PBS -l nodes=1:ppn={nodes}
-#PBS -l walltime=10:00:00
+#PBS -l walltime={time}
 #PBS -A ams-754-aa
 #PBS -N pipeline-{vcf}
 #PBS -o {outfolder}/out.txt
@@ -82,7 +82,7 @@ if __name__ == '__main__':
 
 	create_folder(options.outfolder)
 	create_individuals_files(options)
-
+	options.outfolder  = os.path.realpath(options.outfolder)
 	if options.dephase:
 		qsub_script += '{home}/src/dephase.py --vcf {vcf_og} --out {outfolder}'
 		ext = options.vcf.split(os.extsep)
@@ -92,7 +92,7 @@ if __name__ == '__main__':
 							  '{outfolder}/ref.vcf.gz',
 							  options)
 	qsub_script += create_vcf(options.vcf,
-							  '--keep {outfolder}/test.inds --remove-indels',
+							  '--keep {outfolder}/study.inds --remove-indels',
 							  '{outfolder}/study_ground_truth.vcf.gz',
 							  options)
 
@@ -116,4 +116,5 @@ if __name__ == '__main__':
 				nodes=options.nodes,
 				queue=options.queue,
 				split_vcf_jar=options.split_vcf_jar,
-				vcf_og=options.vcf_og))
+				vcf_og=options.vcf_og,
+				time='24:00:00' if not options.queue == 'debug' else '00:20:00'))
