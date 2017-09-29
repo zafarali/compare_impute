@@ -58,7 +58,7 @@ def create_vcf(vcf, arguments, outname, options):
 
 def split_vcfs(vcf, options, coresize=5000000):
 	splitter="""
-	bash {home}/splitter.sh {vcf} {split_vcf_jar}"""
+	bash {home}/src/splitter.sh """ + vcf +""" {split_vcf_jar}"""
 	return splitter
 
 def simulate_affy_panels(options):
@@ -80,9 +80,11 @@ if __name__ == '__main__':
 	options.vcf_og = options.vcf # store this as the global truth
 	qsub_script = TEMPLATE
 
+
+	options.outfolder  = os.path.realpath(options.outfolder)
 	create_folder(options.outfolder)
 	create_individuals_files(options)
-	options.outfolder  = os.path.realpath(options.outfolder)
+
 	if options.dephase:
 		qsub_script += '{home}/src/dephase.py --vcf {vcf_og} --out {outfolder}'
 		ext = options.vcf.split(os.extsep)
