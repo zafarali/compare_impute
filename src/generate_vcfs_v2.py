@@ -25,8 +25,8 @@ class Sampler(object):
 	def __init__(self, vcf):
 		individual_ids = np.genfromtxt(vcf, dtype=str, max_rows=1, comments='##').tolist()
 		self.all_inds = individual_ids[9:]
-	def train_test_split(self, train_count):
-		train_count = min(train_count,len(self.all_inds))
+	def train_test_split(self, train_percentage=0.85):
+		train_count = int(len(self.all_inds)*train_percentage)
 		random.shuffle(self.all_inds)
 		return self.all_inds[:train_count], self.all_inds[train_count:]
 
@@ -37,7 +37,7 @@ def write_individuals_file(filename, individuals):
 
 def create_individuals_files(options):
 	sampler = Sampler(options.vcf)
-	train_inds, test_inds = sampler.train_test_split(train_count=1204)
+	train_inds, test_inds = sampler.train_test_split()
 	reference_file = os.path.join(options.outfolder, 'ref.inds')
 	study_file = os.path.join(options.outfolder, 'study.inds')
 	write_individuals_file(reference_file, train_inds)
