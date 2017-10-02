@@ -86,7 +86,7 @@ if __name__ == '__main__':
 	create_individuals_files(options)
 
 	if options.dephase:
-		qsub_script += '{home}/src/dephase.py --vcf {vcf_og} --out {outfolder}'
+		qsub_script += 'python3.5 {home}/src/dephase.py --vcf {vcf_og} --out {outfolder}'
 		ext = options.vcf.split(os.extsep)
 		options.vcf = os.path.join(options.outfolder, ext[0] + '.dephased.' + '.'.join(ext[1:]))
 	qsub_script += create_vcf(options.vcf,
